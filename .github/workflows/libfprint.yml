@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '37 5 * * *'
   workflow_dispatch:
-    inputs:
-      promote_commit:
-        description: Full staged Git commit to promote after testing on the reader
-        type: string
-        required: false
 
 concurrency:
   group: libfprint-obs
@@ -18,20 +13,12 @@ jobs:
   refresh:
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
-    timeout-minutes: 95
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Generate and verify the staging candidate
-        env:
-          OBS_STAGING_TOKEN: ${{ secrets.OBS_STAGING_TOKEN }}
-          OBS_PRODUCTION_ENABLED: ${{ vars.OBS_PRODUCTION_ENABLED }}
-          PROMOTE_COMMIT: ${{ inputs.promote_commit }}
-        run: python3 -B sync.py stage
-      - name: Promote or reconcile the production package
-        if: vars.OBS_PRODUCTION_ENABLED == 'true'
+      - name: Update and verify the OBS package
         env:
           OBS_PRODUCTION_TOKEN: ${{ secrets.OBS_PRODUCTION_TOKEN }}
-          PROMOTE_COMMIT: ${{ inputs.promote_commit }}
-        run: python3 -B sync.py publish
+        run: python3 -B sync.py

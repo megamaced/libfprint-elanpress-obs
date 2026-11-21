@@ -18,7 +18,6 @@ import xml.etree.ElementTree as ET
 
 OBS_API = "https://api.opensuse.org"
 PRODUCTION = "home:megamaced"
-STAGING = "home:megamaced:libfprint-ci"
 PACKAGE = "libfprint"
 UPSTREAM = "https://gitlab.freedesktop.org/libfprint/libfprint.git"
 MR_API = "https://gitlab.freedesktop.org/api/v4/projects/libfprint%2Flibfprint/merge_requests/654"
@@ -33,13 +32,6 @@ DISTRO_PATCHES = (
     "libfprint-old-meson.patch",
     "focal-tech-support.patch",
 )
-TARGETS = {
-    ("openSUSE_Tumbleweed", "x86_64"),
-    ("openSUSE_Slowroll", "x86_64"),
-    ("16.0", "aarch64"),
-    ("16.0", "x86_64"),
-    ("15.6", "x86_64"),
-}
 GIT_SHA = re.compile(r"[a-f0-9]{40}")
 AUTOMATIC_PATHS = {
     "libfprint/drivers/elanpress.c",
@@ -84,8 +76,8 @@ def obs_xml(path):
     return ET.fromstring(get(f"{OBS_API}/public/{path}"))
 
 
-def source(project):
-    return obs_xml(f"source/{project}/{PACKAGE}?expand=1")
+def source():
+    return obs_xml(f"source/{PRODUCTION}/{PACKAGE}?expand=1")
 
 
 def entries(directory):
@@ -100,17 +92,17 @@ def baseline(directory):
     }
 
 
-def assert_baseline(directory, expected, project):
+def assert_baseline(directory, expected):
     if baseline(directory) != expected:
-        raise SyncError(f"{project} packaging inputs changed. Review the OBS base and re-stage.")
+        raise SyncError(f"{PRODUCTION} packaging inputs changed. Review the OBS base before updating the backport.")
 
 
-def source_file(project, directory, name):
+def source_file(directory, name):
     revision = urllib.parse.quote(directory.attrib["srcmd5"])
     file = urllib.parse.quote(name, safe="")
-    data = get(f"{OBS_API}/public/source/{project}/{PACKAGE}/{file}?rev={revision}")
+    data = get(f"{OBS_API}/public/source/{PRODUCTION}/{PACKAGE}/{file}?rev={revision}")
     if hashlib.md5(data).hexdigest() != entries(directory).get(name):
-        raise SyncError(f"OBS source file checksum differs for {project}/{name}")
+        raise SyncError(f"OBS source file checksum differs for {PRODUCTION}/{name}")
     return data
 
 
@@ -120,13 +112,13 @@ def git_sha(value):
     return value
 
 
-def fetch_branch(branch):
-    git("fetch", "--no-tags", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
-    return git_sha(git("rev-parse", f"refs/remotes/origin/{branch}").decode().strip())
+def fetch_release():
+    git("fetch", "--no-tags", "origin", "refs/heads/release:refs/remotes/origin/release")
+    return git_sha(git("rev-parse", "refs/remotes/origin/release").decode().strip())
 
 
-def push_branch(branch, commit):
-    git("push", "origin", f"{git_sha(commit)}:refs/heads/{branch}")
+def push_release(commit):
+    git("push", "origin", f"{git_sha(commit)}:refs/heads/release")
 
 
 def payload(commit):
@@ -154,7 +146,7 @@ def fetch_mr(repo, expected):
 
 def distro_tree(work, directory):
     for name in (ARCHIVE, *DISTRO_PATCHES):
-        data = source_file(PRODUCTION, directory, name)
+        data = source_file(directory, name)
         (work / name).write_bytes(data)
     with tarfile.open(work / ARCHIVE) as archive:
         archive.extractall(work, filter="data")
@@ -175,11 +167,11 @@ def commit(repo, message):
     return git_sha(git("rev-parse", "HEAD", cwd=repo).decode().strip())
 
 
-def update_candidate(candidate, patch, manifest, directory):
+def update_release(release, patch, manifest, directory):
     latest = mr_head()
     previous = manifest["upstream"]
     if previous == latest:
-        return candidate
+        return release
     with tempfile.TemporaryDirectory(prefix="elanpress-refresh-") as tmp:
         work = Path(tmp)
         upstream = work / "upstream"
@@ -211,28 +203,28 @@ def update_candidate(candidate, patch, manifest, directory):
             git("apply", "--3way", "-", cwd=tree, input_data=delta)
         git("diff", "--cached", "--check", original, cwd=tree)
         new_patch = git("diff", "--cached", "--binary", original, cwd=tree)
-        candidate_tree = work / "candidate"
-        git("worktree", "add", "--detach", str(candidate_tree), candidate)
+        release_tree = work / "release"
+        git("worktree", "add", "--detach", str(release_tree), release)
         try:
-            (candidate_tree / PATCH).write_bytes(new_patch)
+            (release_tree / PATCH).write_bytes(new_patch)
             manifest.update(
                 upstream=latest,
                 patch_sha256=hashlib.sha256(new_patch).hexdigest(),
-                automatic_parent=candidate,
             )
-            (candidate_tree / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-            git("add", PATCH, MANIFEST, cwd=candidate_tree)
-            updated = commit(candidate_tree, f"Backport libfprint MR !654 at {latest[:12]}")
-            push_branch("candidate", updated)
+            (release_tree / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            git("add", PATCH, MANIFEST, cwd=release_tree)
+            updated = commit(release_tree, f"Backport libfprint MR !654 at {latest[:12]}")
+            assert_baseline(source(), manifest["baseline"])
+            push_release(updated)
             return updated
         finally:
-            git("worktree", "remove", "--force", str(candidate_tree))
+            git("worktree", "remove", "--force", str(release_tree))
 
 
-def trigger(token_var):
-    token = os.environ.get(token_var)
+def trigger():
+    token = os.environ.get("OBS_PRODUCTION_TOKEN")
     if not token:
-        raise SyncError(f"Missing GitHub Actions secret {token_var}")
+        raise SyncError("Missing GitHub Actions secret OBS_PRODUCTION_TOKEN")
     request = urllib.request.Request(
         f"{OBS_API}/trigger/runservice",
         headers={"Authorization": f"Token {token}"},
@@ -242,124 +234,94 @@ def trigger(token_var):
         response.read()
 
 
-def build_status(project, commit, patch, manifest):
-    directory = source(project)
-    assert_baseline(directory, manifest["baseline"], project)
+def build_status(commit, patch, manifest):
+    directory = source()
+    assert_baseline(directory, manifest["baseline"])
     files = entries(directory)
     if PATCH in files:
-        raise SyncError(f"{project} has a plain Patch3 alongside the source service.")
+        raise SyncError(f"{PRODUCTION} has a plain Patch3 alongside the source service.")
     service = directory.find("serviceinfo")
     if "_service_error" in files or service is not None and service.get("code") in {"failed", "broken"}:
-        raise SyncError(f"OBS source service failed in {project}. See the package source service log.")
+        raise SyncError(f"OBS source service failed in {PRODUCTION}. See the package source service log.")
     if service is None:
         if "_service" not in files:
-            raise SyncError(f"{project} has no OBS source service configured.")
+            raise SyncError(f"{PRODUCTION} has no OBS source service configured.")
         return "patch import needed", False
     if service.get("code") != "succeeded":
         return "import pending", False
     if files.get(SERVICE_PREFIX + PATCH) != hashlib.md5(patch).hexdigest():
         return "patch import needed", False
-    obsinfo = source_file(project, directory, SERVICE_INFO).decode()
+    obsinfo = source_file(directory, SERVICE_INFO).decode()
     if f"commit: {commit}" not in obsinfo.splitlines():
         return "Git revision import needed", False
 
-    results = obs_xml(f"build/{project}/_result?package={PACKAGE}")
+    targets = {
+        (repo.get("name"), arch.text)
+        for repo in obs_xml(f"source/{PRODUCTION}/_meta").findall("repository")
+        for arch in repo.findall("arch")
+    }
+    results = obs_xml(f"build/{PRODUCTION}/_result?package={PACKAGE}")
     actual = {(result.get("repository"), result.get("arch")) for result in results}
-    if actual != TARGETS:
-        raise SyncError(f"Unexpected build targets in {project}: {sorted(actual)}")
+    if not targets:
+        raise SyncError(f"{PRODUCTION} has no configured build targets.")
+    if actual != targets:
+        return f"waiting for configured OBS build targets (reported {sorted(actual)})", False
     pending = []
     publishing = []
     for result in results:
         repo, arch = result.get("repository"), result.get("arch")
         status = result.find("status").get("code")
         if status in {"failed", "unresolvable", "broken", "excluded", "disabled"}:
-            raise SyncError(f"{project} {repo}/{arch}: {status}")
+            raise SyncError(f"{PRODUCTION} {repo}/{arch}: {status}")
         if status != "succeeded":
             pending.append(f"{repo}/{arch} {status}")
             continue
-        history = obs_xml(f"build/{project}/{repo}/{arch}/{PACKAGE}/_history").findall("entry")
+        history = obs_xml(f"build/{PRODUCTION}/{repo}/{arch}/{PACKAGE}/_history").findall("entry")
         if not history or history[-1].get("srcmd5") != directory.get("srcmd5"):
             pending.append(f"{repo}/{arch} build of current revision pending")
-        elif project == PRODUCTION and result.get("code") != "published":
+        elif result.get("code") != "published":
             publishing.append(f"{repo}/{arch}")
     if pending:
         return ", ".join(pending), False
-    verified = f"verified source {directory.attrib['srcmd5']} on all five targets"
+    verified = f"verified source {directory.attrib['srcmd5']} on all {len(targets)} targets"
     if publishing:
         verified += "; OBS repository publication pending on " + ", ".join(publishing)
     return verified, True
 
 
-def ensure_build(project, commit, token_var=None):
+def ensure_build(commit):
     patch, manifest = payload(commit)
-    if project == STAGING:
-        config = get(f"{OBS_API}/public/source/{STAGING}/_config").decode()
-        if "%libfprint_strict_tests 1" not in config.splitlines():
-            raise SyncError("OBS staging no longer enforces Meson test failures.")
-    status, done = build_status(project, commit, patch, manifest)
+    status, done = build_status(commit, patch, manifest)
     started = time.monotonic()
     triggers = 0
     previous = None
     while True:
         if status != previous:
-            print(f"{project} {commit[:12]}: {status}", flush=True)
+            print(f"{PRODUCTION} {commit[:12]}: {status}", flush=True)
             previous = status
         if done:
             return
         elapsed = time.monotonic() - started
-        if token_var is None or elapsed >= 35 * 60:
-            raise SyncError(f"OBS did not verify {project} at {commit}: {status}")
+        if elapsed >= 35 * 60:
+            raise SyncError(f"OBS did not verify {PRODUCTION} at {commit}: {status}")
         needs_import = status in {"patch import needed", "Git revision import needed"}
         if needs_import and (triggers == 0 or triggers == 1 and elapsed >= 300):
-            trigger(token_var)
+            trigger()
             triggers += 1
         time.sleep(25)
-        status, done = build_status(project, commit, patch, manifest)
-
-
-def stage(candidate, release, requested):
-    patch, manifest = payload(candidate)
-    directory = source(PRODUCTION)
-    assert_baseline(directory, manifest["baseline"], PRODUCTION)
-    if requested:
-        if os.environ.get("OBS_PRODUCTION_ENABLED") != "true":
-            raise SyncError("Production promotions are disabled.")
-        if git_sha(requested) != candidate:
-            raise SyncError("The requested promotion is no longer the candidate branch head.")
-    if not requested and candidate == release:
-        candidate = update_candidate(candidate, patch, manifest, directory)
-    ensure_build(STAGING, candidate, "OBS_STAGING_TOKEN")
-    print(f"Staged GitHub commit {candidate}")
-
-
-def publish(candidate, release, requested):
-    _, manifest = payload(candidate)
-    if requested and git_sha(requested) != candidate:
-        raise SyncError("The requested promotion is no longer the candidate branch head.")
-    automatic = (
-        candidate != release
-        and manifest.get("automatic_parent") == release
-        and git("rev-list", "--parents", "-n", "1", candidate).decode().split() == [candidate, release]
-    )
-    if candidate != release and (requested or automatic):
-        ensure_build(STAGING, candidate)
-        assert_baseline(source(PRODUCTION), manifest["baseline"], PRODUCTION)
-        push_branch("release", candidate)
-        release = candidate
-    elif candidate != release:
-        print(f"Manual update awaits a hardware check and explicit promotion of {candidate}.")
-    ensure_build(PRODUCTION, release, "OBS_PRODUCTION_TOKEN")
+        status, done = build_status(commit, patch, manifest)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("step", choices=("stage", "publish"))
-    args = parser.parse_args()
+    parser.parse_args()
     try:
-        candidate, release = fetch_branch("candidate"), fetch_branch("release")
-        requested = os.environ.get("PROMOTE_COMMIT", "").strip()
-        step = stage if args.step == "stage" else publish
-        step(candidate, release, requested)
+        release = fetch_release()
+        patch, manifest = payload(release)
+        directory = source()
+        assert_baseline(directory, manifest["baseline"])
+        release = update_release(release, patch, manifest, directory)
+        ensure_build(release)
     except (SyncError, urllib.error.URLError, TimeoutError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Elan backport refresh failed: {error}\n")
 
