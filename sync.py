@@ -270,7 +270,11 @@ def build_status(commit, patch, manifest):
     publishing = []
     for result in results:
         repo, arch = result.get("repository"), result.get("arch")
-        status = result.find("status").get("code")
+        package_status = result.find("status")
+        if package_status is None:
+            pending.append(f"{repo}/{arch} waiting for package status")
+            continue
+        status = package_status.get("code")
         if status in {"failed", "unresolvable", "broken", "excluded", "disabled"}:
             raise SyncError(f"{PRODUCTION} {repo}/{arch}: {status}")
         if status != "succeeded":
