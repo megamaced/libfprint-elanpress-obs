@@ -1,0 +1,9 @@
+<services>
+  <service name="obs_scm" mode="serveronly">
+    <param name="scm">git</param>
+    <param name="url">https://github.com/megamaced/libfprint-elanpress-obs.git</param>
+    <param name="revision">refs/heads/release</param>
+    <param name="filename">elanpress-backport</param>
+    <param name="extract">libfprint-elanpress-0c63.patch</param>
+  </service>
+</services>

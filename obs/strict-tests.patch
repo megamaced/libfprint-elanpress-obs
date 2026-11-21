@@ -1,0 +1,9 @@
+--- a/libfprint.spec
++++ b/libfprint.spec
+@@ -155,2 +155,6 @@
+ %check
++%if 0%{?libfprint_strict_tests}
++%meson_test
++%else
+ %meson_test || :
++%endif
