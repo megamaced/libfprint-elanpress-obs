@@ -18,7 +18,7 @@ jobs:
   refresh:
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
-    timeout-minutes: 80
+    timeout-minutes: 95
     permissions:
       contents: write
     steps:
@@ -26,6 +26,7 @@ jobs:
       - name: Generate and verify the staging candidate
         env:
           OBS_STAGING_TOKEN: ${{ secrets.OBS_STAGING_TOKEN }}
+          OBS_PRODUCTION_ENABLED: ${{ vars.OBS_PRODUCTION_ENABLED }}
           PROMOTE_COMMIT: ${{ inputs.promote_commit }}
         run: python3 -B sync.py stage
       - name: Promote or reconcile the production package

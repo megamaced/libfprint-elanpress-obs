@@ -23,7 +23,6 @@ PACKAGE = "libfprint"
 UPSTREAM = "https://gitlab.freedesktop.org/libfprint/libfprint.git"
 MR_API = "https://gitlab.freedesktop.org/api/v4/projects/libfprint%2Flibfprint/merge_requests/654"
 MR_REF = "refs/merge-requests/654/head"
-SEPTEMBER_SHA = "952a2c9b1e644b7b98541e0a1d4955f0470affa3"
 PATCH = "libfprint-elanpress-0c63.patch"
 MANIFEST = "backport.json"
 SERVICE_PREFIX = "_service:obs_scm:"
@@ -216,7 +215,11 @@ def update_candidate(candidate, patch, manifest, directory):
         git("worktree", "add", "--detach", str(candidate_tree), candidate)
         try:
             (candidate_tree / PATCH).write_bytes(new_patch)
-            manifest.update(upstream=latest, patch_sha256=hashlib.sha256(new_patch).hexdigest())
+            manifest.update(
+                upstream=latest,
+                patch_sha256=hashlib.sha256(new_patch).hexdigest(),
+                automatic_parent=candidate,
+            )
             (candidate_tree / MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
             git("add", PATCH, MANIFEST, cwd=candidate_tree)
             updated = commit(candidate_tree, f"Backport libfprint MR !654 at {latest[:12]}")
@@ -243,6 +246,8 @@ def build_status(project, commit, patch, manifest):
     directory = source(project)
     assert_baseline(directory, manifest["baseline"], project)
     files = entries(directory)
+    if PATCH in files:
+        raise SyncError(f"{project} has a plain Patch3 alongside the source service.")
     service = directory.find("serviceinfo")
     if "_service_error" in files or service is not None and service.get("code") in {"failed", "broken"}:
         raise SyncError(f"OBS source service failed in {project}. See the package source service log.")
@@ -263,30 +268,33 @@ def build_status(project, commit, patch, manifest):
     if actual != TARGETS:
         raise SyncError(f"Unexpected build targets in {project}: {sorted(actual)}")
     pending = []
+    publishing = []
     for result in results:
         repo, arch = result.get("repository"), result.get("arch")
         status = result.find("status").get("code")
         if status in {"failed", "unresolvable", "broken", "excluded", "disabled"}:
             raise SyncError(f"{project} {repo}/{arch}: {status}")
-        if status != "succeeded" or result.get("dirty") == "true":
+        if status != "succeeded":
             pending.append(f"{repo}/{arch} {status}")
             continue
         history = obs_xml(f"build/{project}/{repo}/{arch}/{PACKAGE}/_history").findall("entry")
         if not history or history[-1].get("srcmd5") != directory.get("srcmd5"):
             pending.append(f"{repo}/{arch} build of current revision pending")
         elif project == PRODUCTION and result.get("code") != "published":
-            pending.append(f"{repo}/{arch} publication pending")
+            publishing.append(f"{repo}/{arch}")
     if pending:
         return ", ".join(pending), False
-    return f"verified source {directory.attrib['srcmd5']} on all five targets", True
+    verified = f"verified source {directory.attrib['srcmd5']} on all five targets"
+    if publishing:
+        verified += "; OBS repository publication pending on " + ", ".join(publishing)
+    return verified, True
 
 
 def ensure_build(project, commit, token_var=None):
     patch, manifest = payload(commit)
     status, done = build_status(project, commit, patch, manifest)
-    if not done and status in {"patch import needed", "Git revision import needed"} and token_var:
-        trigger(token_var)
-    deadline = time.monotonic() + 35 * 60
+    started = time.monotonic()
+    triggers = 0
     previous = None
     while True:
         if status != previous:
@@ -294,23 +302,27 @@ def ensure_build(project, commit, token_var=None):
             previous = status
         if done:
             return
-        if token_var is None or time.monotonic() >= deadline:
+        elapsed = time.monotonic() - started
+        if token_var is None or elapsed >= 35 * 60:
             raise SyncError(f"OBS did not verify {project} at {commit}: {status}")
+        needs_import = status in {"patch import needed", "Git revision import needed"}
+        if needs_import and (triggers == 0 or triggers == 1 and elapsed >= 300):
+            trigger(token_var)
+            triggers += 1
         time.sleep(25)
         status, done = build_status(project, commit, patch, manifest)
 
 
 def stage(candidate, release, requested):
     patch, manifest = payload(candidate)
-    _, released = payload(release)
     directory = source(PRODUCTION)
     assert_baseline(directory, manifest["baseline"], PRODUCTION)
-    if requested and git_sha(requested) != candidate:
-        raise SyncError("The requested promotion is no longer the candidate branch head.")
-    waiting_for_hardware = (
-        released["upstream"] == SEPTEMBER_SHA and manifest["upstream"] != SEPTEMBER_SHA
-    )
-    if not requested and not waiting_for_hardware:
+    if requested:
+        if os.environ.get("OBS_PRODUCTION_ENABLED") != "true":
+            raise SyncError("Production promotions are disabled.")
+        if git_sha(requested) != candidate:
+            raise SyncError("The requested promotion is no longer the candidate branch head.")
+    if not requested and candidate == release:
         candidate = update_candidate(candidate, patch, manifest, directory)
     ensure_build(STAGING, candidate, "OBS_STAGING_TOKEN")
     print(f"Staged GitHub commit {candidate}")
@@ -318,16 +330,20 @@ def stage(candidate, release, requested):
 
 def publish(candidate, release, requested):
     _, manifest = payload(candidate)
-    _, released = payload(release)
     if requested and git_sha(requested) != candidate:
         raise SyncError("The requested promotion is no longer the candidate branch head.")
-    if candidate != release and (requested or released["upstream"] != SEPTEMBER_SHA):
+    automatic = (
+        candidate != release
+        and manifest.get("automatic_parent") == release
+        and git("rev-list", "--parents", "-n", "1", candidate).decode().split() == [candidate, release]
+    )
+    if candidate != release and (requested or automatic):
         ensure_build(STAGING, candidate)
         assert_baseline(source(PRODUCTION), manifest["baseline"], PRODUCTION)
         push_branch("release", candidate)
         release = candidate
     elif candidate != release:
-        print(f"First update awaits a hardware check and manual promotion of {candidate}.")
+        print(f"Manual update awaits a hardware check and explicit promotion of {candidate}.")
     ensure_build(PRODUCTION, release, "OBS_PRODUCTION_TOKEN")
 
 
