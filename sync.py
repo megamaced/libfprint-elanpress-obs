@@ -292,6 +292,10 @@ def build_status(project, commit, patch, manifest):
 
 def ensure_build(project, commit, token_var=None):
     patch, manifest = payload(commit)
+    if project == STAGING:
+        config = get(f"{OBS_API}/public/source/{STAGING}/_config").decode()
+        if "%libfprint_strict_tests 1" not in config.splitlines():
+            raise SyncError("OBS staging no longer enforces Meson test failures.")
     status, done = build_status(project, commit, patch, manifest)
     started = time.monotonic()
     triggers = 0

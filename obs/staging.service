@@ -4,6 +4,7 @@
     <param name="url">https://github.com/megamaced/libfprint-elanpress-obs.git</param>
     <param name="revision">refs/heads/candidate</param>
     <param name="filename">elanpress-backport</param>
+    <param name="include">libfprint-elanpress-0c63.patch</param>
     <param name="extract">libfprint-elanpress-0c63.patch</param>
   </service>
 </services>
