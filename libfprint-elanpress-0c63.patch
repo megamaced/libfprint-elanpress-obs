@@ -1,27 +1,30 @@
 diff --git a/data/autosuspend.hwdb b/data/autosuspend.hwdb
-index 6c15fb94..92fc8694 100644
+index 5c19571..0aa7d83 100644
 --- a/data/autosuspend.hwdb
 +++ b/data/autosuspend.hwdb
-@@ -142,12 +142,10 @@ usb:v04F3p0C30*
+@@ -142,13 +142,9 @@ usb:v04F3p0C30*
  usb:v04F3p0C31*
  usb:v04F3p0C32*
  usb:v04F3p0C33*
 -usb:v04F3p0C3D*
  usb:v04F3p0C42*
- usb:v04F3p0C4B*
+-usb:v04F3p0C4B*
  usb:v04F3p0C4D*
  usb:v04F3p0C4F*
 -usb:v04F3p0C63*
- usb:v04F3p0C6E*
+-usb:v04F3p0C6E*
  usb:v04F3p0C58*
   ID_AUTOSUSPEND=1
-@@ -171,6 +169,12 @@ usb:v04F3p0CB0*
+  ID_PERSIST=0
+@@ -171,6 +167,14 @@ usb:v04F3p0CB0*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
  
 +# Supported by libfprint driver elanpress
 +usb:v04F3p0C3D*
++usb:v04F3p0C4B*
 +usb:v04F3p0C63*
++usb:v04F3p0C6E*
 + ID_AUTOSUSPEND=1
 + ID_PERSIST=0
 +
@@ -29,28 +32,103 @@ index 6c15fb94..92fc8694 100644
  usb:v1C7Ap0603*
   ID_AUTOSUSPEND=1
 diff --git a/libfprint/drivers/elan.h b/libfprint/drivers/elan.h
-index 7d089945..9cdb9aec 100644
+index 7d08994..e09c85a 100644
 --- a/libfprint/drivers/elan.h
 +++ b/libfprint/drivers/elan.h
-@@ -213,12 +213,10 @@ static const FpIdEntry elan_id_table[] = {
+@@ -213,13 +213,9 @@ static const FpIdEntry elan_id_table[] = {
    {.vid = ELAN_VEND_ID,  .pid = 0x0c31, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c32, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c33, .driver_data = ELAN_ALL_DEV},
 -  {.vid = ELAN_VEND_ID,  .pid = 0x0c3d, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c42, .driver_data = ELAN_0C42},
-   {.vid = ELAN_VEND_ID,  .pid = 0x0c4b, .driver_data = ELAN_ALL_DEV},
+-  {.vid = ELAN_VEND_ID,  .pid = 0x0c4b, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c4d, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c4f, .driver_data = ELAN_ALL_DEV},
 -  {.vid = ELAN_VEND_ID,  .pid = 0x0c63, .driver_data = ELAN_ALL_DEV},
-   {.vid = ELAN_VEND_ID,  .pid = 0x0c6e, .driver_data = ELAN_ALL_DEV},
+-  {.vid = ELAN_VEND_ID,  .pid = 0x0c6e, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c58, .driver_data = ELAN_ALL_DEV},
    {.vid = 0,  .pid = 0,  .driver_data = 0},
+ };
+diff --git a/libfprint/drivers/elanpress-match-sums.h b/libfprint/drivers/elanpress-match-sums.h
+new file mode 100644
+index 0000000..549202a
+--- /dev/null
++++ b/libfprint/drivers/elanpress-match-sums.h
+@@ -0,0 +1,68 @@
++/*
++ * Cross-term loop of the ELAN press-type matcher, one copy per instruction set
++ *
++ * Copyright (C) 2026 Hugo Sales
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ */
++
++/* The cross-term loop of layer_sums_fullb(), included once per instruction
++ * set by elanpress-match.c. The includer defines SUMS_NAME and SUMS_ATTR for
++ * the function, the vector type SUMS_VEC holding SUMS_W pixels, SUMS_ZERO,
++ * SUMS_LOAD (p), SUMS_DOT (acc, x, y), which adds the pairwise products of x
++ * and y to the 32-bit lanes of acc, and SUMS_ADD (acc), which adds them up. */
++
++G_STATIC_ASSERT (BLOCK % SUMS_W == 0);
++
++SUMS_ATTR static void
++SUMS_NAME (const Layer *a, const Layer *b, int dx, int dy,
++           int x0, int y0, int x1, int y1, const gboolean fulla,
++           gint64 s[5])
++{
++  SUMS_VEC vsb = SUMS_ZERO, vsbb = SUMS_ZERO, vsab = SUMS_ZERO;
++
++  for (int y = y0; y < y1; y++)
++    {
++      const gint16 *av = a->v + y * a->stride + x0;
++      const gint16 *am = a->m + y * a->stride + x0;
++      const gint16 *bv = b->v + (y - dy) * b->stride + (x0 - dx);
++      const gint16 *bq = b->q + (y - dy) * b->stride + (x0 - dx);
++
++      if (fulla)
++        {
++          for (int x = 0; x < x1 - x0; x += SUMS_W)
++            vsab = SUMS_DOT (vsab, SUMS_LOAD (av + x), SUMS_LOAD (bv + x));
++        }
++      else
++        {
++          for (int x = 0; x < x1 - x0; x += SUMS_W)
++            {
++              SUMS_VEC m = SUMS_LOAD (am + x), v = SUMS_LOAD (bv + x);
++
++              vsb = SUMS_DOT (vsb, v, m);
++              vsbb = SUMS_DOT (vsbb, SUMS_LOAD (bq + x), m);
++              vsab = SUMS_DOT (vsab, SUMS_LOAD (av + x), v);
++            }
++        }
++    }
++  s[1] += SUMS_ADD (vsb);
++  s[3] += SUMS_ADD (vsbb);
++  s[4] += SUMS_ADD (vsab);
++}
++
++#undef SUMS_NAME
++#undef SUMS_ATTR
++#undef SUMS_VEC
++#undef SUMS_W
++#undef SUMS_ZERO
++#undef SUMS_LOAD
++#undef SUMS_DOT
++#undef SUMS_ADD
 diff --git a/libfprint/drivers/elanpress-match.c b/libfprint/drivers/elanpress-match.c
 new file mode 100644
-index 00000000..d03ee53d
+index 0000000..306b23b
 --- /dev/null
 +++ b/libfprint/drivers/elanpress-match.c
-@@ -0,0 +1,1028 @@
+@@ -0,0 +1,1715 @@
 +/*
 + * Image processing and correlation matching for ELAN press-type sensors
 + *
@@ -77,9 +155,14 @@ index 00000000..d03ee53d
 + * Lesser General Public License for more details.
 + */
 +
++#include "config.h"
++
 +#include "elanpress-match.h"
 +
 +#include <math.h>
++#ifdef __SSE2__
++#include <immintrin.h>
++#endif
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <string.h>
@@ -87,6 +170,39 @@ index 00000000..d03ee53d
 +#ifndef M_PI
 +#define M_PI 3.14159265358979323846
 +#endif
++
++/* the unit test counts the windowed searches that fall back, and can turn
++ * the peaks on where the matcher leaves them off and change the window
++ * radius, to show that its pairs depend on both */
++#ifndef ELANPRESS_COUNT_FALLBACK
++#define ELANPRESS_COUNT_FALLBACK()
++#endif
++#ifndef ELANPRESS_PEAKS_OFF
++#define ELANPRESS_PEAKS_OFF(maps, mask) ((maps) || (mask))
++#endif
++#ifndef ELANPRESS_PEAK_RADIUS
++#define ELANPRESS_PEAK_RADIUS 3
++#endif
++
++/* the unit test also builds the matcher without intrinsics, so the
++ * portable loops run on x86 too */
++#if defined(__SSE2__) && !defined(ELANPRESS_NO_INTRINSICS)
++#define ELANPRESS_SSE2 1
++/* meson checks that the compiler can build the AVX2 and AVX-512 copies */
++#if HAVE_ELANPRESS_AVX
++#define ELANPRESS_DISPATCH 1
++#endif
++#endif
++
++/* Two pixels of different values correlate at exactly +1 or -1, so with a
++ * tiny FP_ELANPRESS_MIN_OVERLAP a placement that barely touches the template
++ * could win. Whatever the setting, a placement has to overlap by this many
++ * pixels at full resolution, as layer_ncc_rect() asks of its blocks, and by
++ * the same area at half resolution. Quarter-resolution peaks need as many
++ * pixels as half resolution, since the same area there is only 4 pixels,
++ * and corners that small would take peak slots. A frame of fewer pixels
++ * matches nothing, which the driver avoids by taking 32x32 and up */
++#define MIN_OVERLAP_PIXELS 64
 +
 +/* ------------------------------------------------------------ params */
 +
@@ -105,56 +221,216 @@ index 00000000..d03ee53d
 +  p->sidelobe_r = 4;
 +  p->block_weight = 0.0;
 +  p->rot_prefilter = 3;
++  p->coarse_peaks = 4;
 +  p->reg_thresh = 0.75;
 +  p->max_side = 256;
 +}
 +
-+static gboolean
-+env_double (const char *name, double *out)
++/* d as the parser reads it, with a '.' whatever the locale */
++static const char *
++env_format (char buf[G_ASCII_DTOSTR_BUF_SIZE], double d)
++{
++  return g_ascii_formatd (buf, G_ASCII_DTOSTR_BUF_SIZE, "%g", d);
++}
++
++/* the value of name for a message, escaped so a newline in it can't start
++ * a line of its own in a log */
++static char *
++env_escaped (const char *name)
++{
++  return g_strescape (g_getenv (name) ? g_getenv (name) : "", NULL);
++}
++
++double
++elanpress_env_double (const char *name, double def)
 +{
 +  const char *v = g_getenv (name);
++  char buf[G_ASCII_DTOSTR_BUF_SIZE];
 +  char *end;
 +  double d;
 +
 +  if (!v || !*v)
-+    return FALSE;
++    return def;
 +  d = g_ascii_strtod (v, &end);
-+  if (end == v)
-+    return FALSE;
-+  *out = d;
-+  return TRUE;
++  /* g_ascii_strtod () skips leading space, so trailing space is skipped
++   * too, as from an env file */
++  while (end != v && g_ascii_isspace (*end))
++    end++;
++  /* g_ascii_strtod () accepts "nan" and "inf", and overflows to inf */
++  if (end == v || *end || !isfinite (d))
++    {
++      g_autofree char *esc = g_strescape (v, NULL);
++
++      g_message ("Ignoring %s=\"%s\", expected a number, using %s",
++                 name, esc, env_format (buf, def));
++      return def;
++    }
++  return d;
++}
++
++/* d, read from name, clamped to [lo, hi]; logged if it was outside */
++static double
++env_clamp (const char *name, double d, double lo, double hi)
++{
++  char buf[G_ASCII_DTOSTR_BUF_SIZE];
++
++  if (d < lo || d > hi)
++    {
++      g_autofree char *esc = env_escaped (name);
++
++      d = CLAMP (d, lo, hi);
++      g_message ("%s=\"%s\" is out of range, using %s",
++                 name, esc, env_format (buf, d));
++    }
++  return d;
++}
++
++/* d, read from name, clamped to [lo, hi] while still a double, since a
++ * double past G_MAXINT does not fit an int, then cut to an integer and,
++ * if odd is set, made odd; logged if any of these changed it */
++static int
++env_clamp_int (const char *name, double d, int lo, int hi, gboolean odd)
++{
++  double c = CLAMP (d, lo, hi);
++  int n = (int) c;
++
++  if (odd)
++    n |= 1;
++  if (n != d)
++    {
++      g_autofree char *esc = env_escaped (name);
++
++      g_message ("%s=\"%s\" is %s, using %d", name, esc,
++                 c != d ? "out of range" :
++                 n != c && (int) c == c ? "not odd" : "not a whole number", n);
++    }
++  return n;
++}
++
++/* d, read from name, if ok, or else def, logged with what was expected */
++static double
++env_ignore_unless (const char *name, double d, gboolean ok,
++                   const char *expected, double def)
++{
++  char buf[G_ASCII_DTOSTR_BUF_SIZE];
++  g_autofree char *esc = NULL;
++
++  if (ok)
++    return d;
++  esc = env_escaped (name);
++  g_message ("Ignoring %s=\"%s\", expected a number %s, using %s",
++             name, esc, expected, env_format (buf, def));
++  return def;
++}
++
++/* an integer setting; values under min are ignored, as before, and the rest
++ * are clamped to max */
++static int
++env_int (const char *name, int min, int max, gboolean odd, int def)
++{
++  double d = elanpress_env_double (name, def);
++
++  if (d < min)
++    {
++      g_autofree char *esc = env_escaped (name);
++
++      g_message ("Ignoring %s=\"%s\", expected at least %d, using %d",
++                 name, esc, min, def);
++      return def;
++    }
++  return env_clamp_int (name, d, min, max, odd);
 +}
 +
 +void
 +elanpress_match_params_from_env (ElanpressMatchParams *p)
 +{
++  char buf[G_ASCII_DTOSTR_BUF_SIZE];
 +  double d;
 +
 +  elanpress_match_params_default (p);
-+  if (env_double ("FP_ELANPRESS_THRESHOLD", &d))
-+    p->threshold = d;
-+  if (env_double ("FP_ELANPRESS_ROT_RANGE", &d))
-+    p->rot_range = d;
-+  if (env_double ("FP_ELANPRESS_ROT_STEP", &d) && d > 0)
-+    p->rot_step = d;
-+  if (env_double ("FP_ELANPRESS_MIN_OVERLAP", &d))
-+    p->min_overlap = d;
-+  if (env_double ("FP_ELANPRESS_NORM_WIN", &d) && d >= 3)
-+    p->norm_win = ((int) d) | 1;
-+  if (env_double ("FP_ELANPRESS_CANDIDATES", &d) && d >= 1)
-+    p->candidates = (int) d;
-+  if (env_double ("FP_ELANPRESS_SCORE_MODE", &d))
-+    p->score_mode = CLAMP ((int) d, 0, 2);
-+  if (env_double ("FP_ELANPRESS_SIDELOBE_R", &d) && d >= 1)
-+    p->sidelobe_r = (int) d;
-+  if (env_double ("FP_ELANPRESS_BLOCK_WEIGHT", &d))
-+    p->block_weight = CLAMP (d, 0.0, 1.0);
-+  if (env_double ("FP_ELANPRESS_ROT_PREFILTER", &d) && d >= 0)
-+    p->rot_prefilter = (int) d;
-+  if (env_double ("FP_ELANPRESS_REG_THRESH", &d))
-+    p->reg_thresh = d;
-+  if (env_double ("FP_ELANPRESS_MAX_SIDE", &d) && d >= 64)
-+    p->max_side = (int) d;
++  /* range / step sets how many rotated copies of the probe are made */
++  d = elanpress_env_double ("FP_ELANPRESS_ROT_RANGE", p->rot_range);
++  p->rot_range = env_clamp ("FP_ELANPRESS_ROT_RANGE", d,
++                            0, ELANPRESS_MAX_ROT_RANGE);
++  d = elanpress_env_double ("FP_ELANPRESS_ROT_STEP", p->rot_step);
++  if (d > 0)
++    {
++      p->rot_step = env_clamp ("FP_ELANPRESS_ROT_STEP", d,
++                               ELANPRESS_MIN_ROT_STEP, G_MAXDOUBLE);
++    }
++  else
++    {
++      g_autofree char *esc = env_escaped ("FP_ELANPRESS_ROT_STEP");
++
++      g_message ("Ignoring FP_ELANPRESS_ROT_STEP=\"%s\", expected a number above 0, using %s",
++                 esc, env_format (buf, p->rot_step));
++    }
++  /* a fraction of the frame, multiplied by its area and cast to int. Above
++   * 1 no placement overlaps enough, so every match fails */
++  d = elanpress_env_double ("FP_ELANPRESS_MIN_OVERLAP", p->min_overlap);
++  if (d > 0 && d <= 1)
++    {
++      p->min_overlap = d;
++    }
++  else
++    {
++      g_autofree char *esc = env_escaped ("FP_ELANPRESS_MIN_OVERLAP");
++
++      g_message ("Ignoring FP_ELANPRESS_MIN_OVERLAP=\"%s\", expected a number in (0, 1], using %s",
++                 esc, env_format (buf, p->min_overlap));
++    }
++  p->norm_win = env_int ("FP_ELANPRESS_NORM_WIN", 3, G_MAXINT, TRUE, p->norm_win);
++  p->candidates = env_int ("FP_ELANPRESS_CANDIDATES", 1, ELANPRESS_MAX_CANDIDATES, FALSE,
++                           p->candidates);
++  d = elanpress_env_double ("FP_ELANPRESS_SCORE_MODE", p->score_mode);
++  p->score_mode = env_clamp_int ("FP_ELANPRESS_SCORE_MODE", d, 0, 2, FALSE);
++  p->sidelobe_r = env_int ("FP_ELANPRESS_SIDELOBE_R", 1, G_MAXINT, FALSE, p->sidelobe_r);
++  d = elanpress_env_double ("FP_ELANPRESS_BLOCK_WEIGHT", p->block_weight);
++  p->block_weight = env_clamp ("FP_ELANPRESS_BLOCK_WEIGHT", d, 0, 1);
++  p->rot_prefilter = env_int ("FP_ELANPRESS_ROT_PREFILTER", 0, G_MAXINT, FALSE,
++                              p->rot_prefilter);
++  p->coarse_peaks = env_int ("FP_ELANPRESS_COARSE_PEAKS", 0, 64, FALSE,
++                             p->coarse_peaks);
++  d = elanpress_env_double ("FP_ELANPRESS_REG_THRESH", p->reg_thresh);
++  p->reg_thresh = env_ignore_unless ("FP_ELANPRESS_REG_THRESH", d, d > 0 && d <= 1,
++                                     "in (0, 1]", p->reg_thresh);
++  p->max_side = env_int ("FP_ELANPRESS_MAX_SIDE", 64, G_MAXINT, FALSE, p->max_side);
++}
++
++void
++elanpress_device_config_from_env (ElanpressDeviceConfig *cfg)
++{
++  double d;
++
++  /* at 0 or below nearly any finger would match. No upper bound: the
++   * sidelobe score modes go past 1 */
++  d = elanpress_env_double ("FP_ELANPRESS_THRESHOLD", cfg->threshold);
++  cfg->threshold = env_ignore_unless ("FP_ELANPRESS_THRESHOLD", d, d > 0,
++                                      "above 0", cfg->threshold);
++  d = elanpress_env_double ("FP_ELANPRESS_ENROLL_STAGES", cfg->enroll_stages);
++  cfg->enroll_stages = env_clamp_int ("FP_ELANPRESS_ENROLL_STAGES", d,
++                                      1, ELANPRESS_MAX_ENROLL_STAGES, FALSE);
++  d = elanpress_env_double ("FP_ELANPRESS_IMAGES_PER_TOUCH", cfg->images_per_touch);
++  cfg->images_per_touch = env_clamp_int ("FP_ELANPRESS_IMAGES_PER_TOUCH", d,
++                                         1, ELANPRESS_MAX_FRAMES, FALSE);
++  d = elanpress_env_double ("FP_ELANPRESS_DUP_SIMILARITY", cfg->dup_similarity);
++  cfg->dup_similarity = env_clamp ("FP_ELANPRESS_DUP_SIMILARITY", d, 0, 1);
++}
++
++void
++elanpress_gates_from_env (ElanpressGates *g)
++{
++  double d;
++
++  d = elanpress_env_double ("FP_ELANPRESS_MIN_MEAN", ELANPRESS_MIN_MEAN);
++  g->min_mean = env_ignore_unless ("FP_ELANPRESS_MIN_MEAN", d, d >= 0,
++                                   "of at least 0", ELANPRESS_MIN_MEAN);
++  d = elanpress_env_double ("FP_ELANPRESS_MIN_CONTRAST", ELANPRESS_MIN_CONTRAST);
++  g->min_contrast = env_ignore_unless ("FP_ELANPRESS_MIN_CONTRAST", d, d >= 0,
++                                       "of at least 0", ELANPRESS_MIN_CONTRAST);
++  d = elanpress_env_double ("FP_ELANPRESS_MIN_COVERAGE", ELANPRESS_MIN_COVERAGE);
++  g->min_coverage = env_ignore_unless ("FP_ELANPRESS_MIN_COVERAGE", d, d >= 0 && d <= 1,
++                                       "in [0, 1]", ELANPRESS_MIN_COVERAGE);
 +}
 +
 +/* ------------------------------------------------------- raw frames */
@@ -185,6 +461,40 @@ index 00000000..d03ee53d
 +    }
 +  *mean = s / n;
 +  *stddev = sqrt (MAX (ss / n - (s / n) * (s / n), 0.0));
++}
++
++/* Written as the negation of the rejects, so it matches the reject test it
++ * replaced exactly, NaN included */
++gboolean
++elanpress_quality_passes (const ElanpressQuality *q, const ElanpressGates *g)
++{
++  return !(q->mean < g->min_mean || q->contrast < g->min_contrast ||
++           q->coverage < g->min_coverage);
++}
++
++/* A frame taken while the finger lands or lifts fails the coverage gate,
++ * but it is mostly ridge edges, so its contrast can be twice that of a full
++ * press. Letting it set the bar would drop every good frame of the touch */
++double
++elanpress_contrast_bar (const ElanpressQuality *q, guint n,
++                        const ElanpressGates *g)
++{
++  double best = 0;
++
++  for (guint i = 0; i < n; i++)
++    if (elanpress_quality_passes (&q[i], g))
++      best = MAX (best, q[i].contrast);
++  return 0.5 * best;
++}
++
++void
++elanpress_frames_pass (const ElanpressQuality *q, guint n,
++                       const ElanpressGates *g, gboolean *pass)
++{
++  double bar = elanpress_contrast_bar (q, n, g);
++
++  for (guint i = 0; i < n; i++)
++    pass[i] = elanpress_quality_passes (&q[i], g) && !(q[i].contrast < bar);
 +}
 +
 +/* ---------------------------------------------------- preprocessing */
@@ -308,11 +618,30 @@ index 00000000..d03ee53d
 +
 +/* ---------------------------------------------------------- layers */
 +
++/* Pixels per step of the general NCC loop. Each row carries PAD zero
++ * pixels on both sides, so a full-overlap sum can round its span out to
++ * whole steps instead of finishing every short row with a scalar tail. The
++ * cross-term loop of layer_sums_fullb() rounds to BLOCK instead. */
++#ifdef __AVX2__
++#define VEC 32
++#else
++#define VEC 16
++#endif
++#define PAD 32
++G_STATIC_ASSERT (PAD >= VEC / 2);
++
++/* Masks and squares are 16-bit like the values, so every NCC term is a
++ * 16 x 16 -> 32-bit multiply-add (pmaddwd). */
 +typedef struct
 +{
-+  int     w, h;
-+  gint16 *v;   /* value - 128, 0 where invalid */
-+  guint8 *m;   /* validity mask */
++  int      w, h;
++  int      stride;
++  gint16  *buf[3];
++  gint16  *v;  /* value - 128, 0 where invalid */
++  gint16  *m;  /* validity mask, 0 or 1 */
++  gint16  *q;  /* v * v */
++  gboolean full;  /* every pixel valid */
++  gint32  *sat;   /* NULL, or summed-area tables of v, q and m, (w + 1) x (h + 1) each */
 +} Layer;
 +
 +static void
@@ -320,28 +649,99 @@ index 00000000..d03ee53d
 +{
 +  l->w = w;
 +  l->h = h;
-+  l->v = g_new0 (gint16, (size_t) w * h);
-+  l->m = g_new0 (guint8, (size_t) w * h);
++  l->stride = w + 2 * PAD;
++  /* + 2 * PAD keeps the pointers valid when h is 0 */
++  for (int i = 0; i < 3; i++)
++    l->buf[i] = g_new0 (gint16, (size_t) l->stride * h + 2 * PAD);
++  l->v = l->buf[0] + PAD;
++  l->m = l->buf[1] + PAD;
++  l->q = l->buf[2] + PAD;
++  l->full = FALSE;
++  l->sat = NULL;
++}
++
++/* fill in the squares once v and m are final */
++static void
++layer_finish (Layer *l)
++{
++  l->full = TRUE;
++  for (int y = 0; y < l->h; y++)
++    for (int x = 0; x < l->w; x++)
++      {
++        int i = y * l->stride + x;
++
++        l->q[i] = l->v[i] * l->v[i];
++        if (!l->m[i])
++          l->full = FALSE;
++      }
++}
++
++/* q is at most 128 * 128, so a table of q over this many pixels stays
++ * below 2^31 */
++#define TABLE_MAX_PIXELS (G_MAXINT32 / (128 * 128))
++
++/* Summed-area tables for layer_sums_fullb(), which reads them without
++ * checking: every probe layer needs them, and a template needs them
++ * whenever it is full. A layer too large for 32-bit tables gets none and
++ * takes the general path. */
++static void
++layer_build_tables (Layer *l)
++{
++  int sw, sn;
++
++  if ((gint64) l->w * l->h > TABLE_MAX_PIXELS)
++    return;
++  sw = l->w + 1;
++  sn = sw * (l->h + 1);
++  l->sat = g_new0 (gint32, (size_t) 3 * sn);
++  for (int y = 0; y < l->h; y++)
++    for (int x = 0; x < l->w; x++)
++      {
++        int i = y * l->stride + x, j = (y + 1) * sw + x + 1;
++        const gint32 px[3] = { l->v[i], l->q[i], l->m[i] };
++
++        for (int t = 0; t < 3; t++)
++          {
++            gint32 *T = l->sat + t * sn;
++
++            /* column sum first, so no partial sum of q passes T[j] */
++            T[j] = px[t] + T[j - 1] + (T[j - sw] - T[j - sw - 1]);
++          }
++      }
++}
++
++/* sum of table t over the rectangle [x0,x1)x[y0,y1) */
++static inline gint64
++layer_rect_sum (const Layer *l, int t, int x0, int y0, int x1, int y1)
++{
++  int sw = l->w + 1;
++  const gint32 *T = l->sat + (size_t) t * sw * (l->h + 1);
++
++  return (gint64) T[y1 * sw + x1] - T[y0 * sw + x1] - T[y1 * sw + x0] + T[y0 * sw + x0];
 +}
 +
 +static void
 +layer_clear (Layer *l)
 +{
-+  g_clear_pointer (&l->v, g_free);
-+  g_clear_pointer (&l->m, g_free);
++  for (int i = 0; i < 3; i++)
++    g_clear_pointer (&l->buf[i], g_free);
++  g_clear_pointer (&l->sat, g_free);
++  l->v = l->m = l->q = NULL;
 +}
 +
 +static void
 +layer_from_image (Layer *l, const guint8 *img, const guint8 *mask, int w, int h)
 +{
 +  layer_init (l, w, h);
-+  for (int i = 0; i < w * h; i++)
-+    {
-+      if (mask && !mask[i])
-+        continue;
-+      l->v[i] = (gint16) img[i] - 128;
-+      l->m[i] = 1;
-+    }
++  for (int y = 0; y < h; y++)
++    for (int x = 0; x < w; x++)
++      {
++        if (mask && !mask[y * w + x])
++          continue;
++        l->v[y * l->stride + x] = (gint16) img[y * w + x] - 128;
++        l->m[y * l->stride + x] = 1;
++      }
++  layer_finish (l);
 +}
 +
 +/* rotate img by deg around its centre into a same-size layer; pixels whose
@@ -370,9 +770,10 @@ index 00000000..d03ee53d
 +            fx * (1 - fy) * img[y0 * w + x0 + 1] +
 +            (1 - fx) * fy * img[(y0 + 1) * w + x0] +
 +            fx * fy * img[(y0 + 1) * w + x0 + 1];
-+        l->v[y * w + x] = (gint16) lrint (v - 128.0);
-+        l->m[y * w + x] = 1;
++        l->v[y * l->stride + x] = (gint16) lrint (v - 128.0);
++        l->m[y * l->stride + x] = 1;
 +      }
++  layer_finish (l);
 +}
 +
 +/* 2x2 box downsample; a coarse pixel is valid only if all four are */
@@ -385,15 +786,295 @@ index 00000000..d03ee53d
 +  for (int y = 0; y < h; y++)
 +    for (int x = 0; x < w; x++)
 +      {
-+        const gint16 *p = src->v + (2 * y) * src->w + 2 * x;
-+        const guint8 *m = src->m + (2 * y) * src->w + 2 * x;
++        const gint16 *p = src->v + (2 * y) * src->stride + 2 * x;
++        const gint16 *m = src->m + (2 * y) * src->stride + 2 * x;
 +
-+        if (m[0] && m[1] && m[src->w] && m[src->w + 1])
++        if (m[0] && m[1] && m[src->stride] && m[src->stride + 1])
 +          {
-+            l->v[y * w + x] = (p[0] + p[1] + p[src->w] + p[src->w + 1]) / 4;
-+            l->m[y * w + x] = 1;
++            l->v[y * l->stride + x] = (p[0] + p[1] + p[src->stride] + p[src->stride + 1]) / 4;
++            l->m[y * l->stride + x] = 1;
 +          }
 +      }
++  layer_finish (l);
++}
++
++/* The NCC sums of a against b shifted by (dx, dy) over the rectangle
++ * [x0,x1)x[y0,y1) of a. Invalid pixels hold 0, so each one-sided sum only
++ * needs the other side's mask, and the loop has no branches. A row is at
++ * most a few hundred pixels, so its sums fit in 32 bits.
++ *
++ * With step > 1 the span is widened to whole steps. That is only exact when
++ * [x0,x1) is the full overlap of a and b: every pixel outside it is invalid
++ * on one side or the other, padding included. */
++static inline int
++layer_sums_general (const Layer *a, const Layer *b, int dx, int dy,
++                    int x0, int y0, int x1, int y1, const int step, gint64 s[5])
++{
++  int n = 0, extra;
++
++  s[0] = s[1] = s[2] = s[3] = s[4] = 0;
++  if (x1 <= x0)
++    return 0;
++  extra = (step - (x1 - x0) % step) % step;
++  x0 -= extra / 2;
++  x1 += extra - extra / 2;
++  for (int y = y0; y < y1; y++)
++    {
++      const gint16 *av = a->v + y * a->stride + x0;
++      const gint16 *am = a->m + y * a->stride + x0;
++      const gint16 *aq = a->q + y * a->stride + x0;
++      const gint16 *bv = b->v + (y - dy) * b->stride + (x0 - dx);
++      const gint16 *bm = b->m + (y - dy) * b->stride + (x0 - dx);
++      const gint16 *bq = b->q + (y - dy) * b->stride + (x0 - dx);
++      gint32 sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0, rn = 0;
++
++      for (int xs = 0; xs < x1 - x0; xs += step)
++        for (int x = xs; x < xs + step; x++)
++          {
++            sa += av[x] * bm[x];
++            sb += bv[x] * am[x];
++            saa += aq[x] * bm[x];
++            sbb += bq[x] * am[x];
++            sab += av[x] * bv[x];
++            rn += am[x] * bm[x];
++          }
++      s[0] += sa;
++      s[1] += sb;
++      s[2] += saa;
++      s[3] += sbb;
++      s[4] += sab;
++      n += rn;
++    }
++  return n;
++}
++
++/* The fast path pads rows to whole blocks; a literal block length lets the
++ * compiler unroll the inner loop at any vector width. */
++#define BLOCK 32
++G_STATIC_ASSERT (PAD >= BLOCK / 2);
++
++#ifdef ELANPRESS_SSE2
++/* GCC at -O2 adds every block of the loop below down to one number before
++ * starting the next, which costs about as much as the block itself. These
++ * copies keep per-lane sums in registers instead. Each product is at most
++ * 128 * 128 and both layers have tables, so a window holds at most
++ * TABLE_MAX_PIXELS pixels, and neither a 32-bit lane nor the 32-bit total
++ * SUMS_ADD returns can pass 2^31. */
++
++static inline gint32
++hsum128 (__m128i x)
++{
++  x = _mm_add_epi32 (x, _mm_shuffle_epi32 (x, 0x4e));
++  x = _mm_add_epi32 (x, _mm_shuffle_epi32 (x, 0xb1));
++  return _mm_cvtsi128_si32 (x);
++}
++
++#define SUMS_NAME cross_sums_sse2
++#define SUMS_ATTR
++#define SUMS_VEC __m128i
++#define SUMS_W 8
++#define SUMS_ZERO _mm_setzero_si128 ()
++#define SUMS_LOAD(p) _mm_loadu_si128 ((const void *) (p))
++#define SUMS_DOT(acc, x, y) _mm_add_epi32 (acc, _mm_madd_epi16 (x, y))
++#define SUMS_ADD(acc) hsum128 (acc)
++#include "elanpress-match-sums.h"
++
++#ifdef ELANPRESS_DISPATCH
++/* Distributions build for baseline x86-64, so the loop also comes in AVX2
++ * and AVX-512 copies, picked by the CPU at run time. */
++#define SUMS_NAME cross_sums_avx2
++#define SUMS_ATTR __attribute__((target ("avx2")))
++#define SUMS_VEC __m256i
++#define SUMS_W 16
++#define SUMS_ZERO _mm256_setzero_si256 ()
++#define SUMS_LOAD(p) _mm256_loadu_si256 ((const void *) (p))
++#define SUMS_DOT(acc, x, y) _mm256_add_epi32 (acc, _mm256_madd_epi16 (x, y))
++#define SUMS_ADD(acc) \
++  hsum128 (_mm_add_epi32 (_mm256_castsi256_si128 (acc), \
++                          _mm256_extracti128_si256 (acc, 1)))
++#include "elanpress-match-sums.h"
++
++#define SUMS_NAME cross_sums_avx512
++#define SUMS_ATTR __attribute__((target ("avx512bw")))
++#define SUMS_VEC __m512i
++#define SUMS_W 32
++#define SUMS_ZERO _mm512_setzero_si512 ()
++#define SUMS_LOAD(p) _mm512_loadu_si512 ((const void *) (p))
++#define SUMS_DOT(acc, x, y) _mm512_add_epi32 (acc, _mm512_madd_epi16 (x, y))
++#define SUMS_ADD(acc) _mm512_reduce_add_epi32 (acc)
++#include "elanpress-match-sums.h"
++
++/* 1 for SSE2, 2 for AVX2, 3 for AVX-512. FP_ELANPRESS_SIMD=sse2, avx2 or
++ * avx512 caps it, so every copy can run on a newer CPU. */
++static int
++cross_sums_level (void)
++{
++  static gsize level = 0;
++
++  if (g_once_init_enter (&level))
++    {
++      const char *cap = g_getenv ("FP_ELANPRESS_SIMD");
++      gsize l = 1;
++
++      if (__builtin_cpu_supports ("avx512bw"))
++        l = 3;
++      else if (__builtin_cpu_supports ("avx2"))
++        l = 2;
++      if (g_ascii_strcasecmp (cap ? cap : "", "sse2") == 0)
++        {
++          l = 1;
++        }
++      else if (g_ascii_strcasecmp (cap ? cap : "", "avx2") == 0)
++        {
++          l = MIN (l, 2);
++        }
++      else if (cap && *cap && g_ascii_strcasecmp (cap, "avx512") != 0)
++        {
++          g_autofree char *esc = env_escaped ("FP_ELANPRESS_SIMD");
++
++          g_message ("FP_ELANPRESS_SIMD=%s not recognised, expected sse2, avx2 or avx512", esc);
++        }
++      g_once_init_leave (&level, l);
++    }
++  return (int) level;
++}
++
++static void
++cross_sums (const Layer *a, const Layer *b, int dx, int dy,
++            int x0, int y0, int x1, int y1, const gboolean fulla, gint64 s[5])
++{
++  switch (cross_sums_level ())
++    {
++    case 3:
++      cross_sums_avx512 (a, b, dx, dy, x0, y0, x1, y1, fulla, s);
++      break;
++
++    case 2:
++      cross_sums_avx2 (a, b, dx, dy, x0, y0, x1, y1, fulla, s);
++      break;
++
++    default:
++      cross_sums_sse2 (a, b, dx, dy, x0, y0, x1, y1, fulla, s);
++    }
++}
++#else
++static void
++cross_sums (const Layer *a, const Layer *b, int dx, int dy,
++            int x0, int y0, int x1, int y1, const gboolean fulla, gint64 s[5])
++{
++  cross_sums_sse2 (a, b, dx, dy, x0, y0, x1, y1, fulla, s);
++}
++#endif
++#endif
++
++#ifndef ELANPRESS_DISPATCH
++/* FP_ELANPRESS_SIMD only picks a copy where there are several, so say
++ * once that it does nothing here */
++static void
++simd_env_unused (void)
++{
++  static gsize done = 0;
++
++  if (g_once_init_enter (&done))
++    {
++      const char *cap = g_getenv ("FP_ELANPRESS_SIMD");
++
++      if (cap && *cap)
++        {
++          g_autofree char *esc = env_escaped ("FP_ELANPRESS_SIMD");
++
++          g_message ("FP_ELANPRESS_SIMD=%s has no effect, this build has one copy of the sums", esc);
++        }
++      g_once_init_leave (&done, 1);
++    }
++}
++#endif
++
++/* When b is valid everywhere, the sums of a alone and the pixel count are
++ * rectangle sums over a, and only the three terms with b stay in the loop.
++ * When a is valid everywhere too, only the cross term does. */
++static inline int
++layer_sums_fullb (const Layer *a, const Layer *b, int dx, int dy,
++                  int x0, int y0, int x1, int y1, const gboolean fulla,
++                  gint64 s[5])
++{
++  int extra, n;
++
++  s[0] = layer_rect_sum (a, 0, x0, y0, x1, y1);
++  s[2] = layer_rect_sum (a, 1, x0, y0, x1, y1);
++  n = (int) layer_rect_sum (a, 2, x0, y0, x1, y1);
++  s[1] = s[3] = s[4] = 0;
++  if (fulla)
++    {
++      s[1] = layer_rect_sum (b, 0, x0 - dx, y0 - dy, x1 - dx, y1 - dy);
++      s[3] = layer_rect_sum (b, 1, x0 - dx, y0 - dy, x1 - dx, y1 - dy);
++    }
++  extra = (BLOCK - (x1 - x0) % BLOCK) % BLOCK;
++  x0 -= extra / 2;
++  x1 += extra - extra / 2;
++#ifdef ELANPRESS_SSE2
++  cross_sums (a, b, dx, dy, x0, y0, x1, y1, fulla, s);
++#else
++  for (int y = y0; y < y1; y++)
++    {
++      const gint16 *av = a->v + y * a->stride + x0;
++      const gint16 *am = a->m + y * a->stride + x0;
++      const gint16 *bv = b->v + (y - dy) * b->stride + (x0 - dx);
++      const gint16 *bq = b->q + (y - dy) * b->stride + (x0 - dx);
++      gint32 sb = 0, sbb = 0, sab = 0;
++
++      if (fulla)
++        {
++          for (int xs = 0; xs < x1 - x0; xs += BLOCK)
++            for (int x = xs; x < xs + BLOCK; x++)
++              sab += av[x] * bv[x];
++        }
++      else
++        {
++          for (int xs = 0; xs < x1 - x0; xs += BLOCK)
++            for (int x = xs; x < xs + BLOCK; x++)
++              {
++                sb += bv[x] * am[x];
++                sbb += bq[x] * am[x];
++                sab += av[x] * bv[x];
++              }
++        }
++      s[1] += sb;
++      s[3] += sbb;
++      s[4] += sab;
++    }
++#endif
++  return n;
++}
++
++/* Takes the table path when both layers have tables and b is full:
++ * layer_sums_fullb() assumes that every pixel of b is valid. */
++static inline int
++layer_sums (const Layer *a, const Layer *b, int dx, int dy,
++            int x0, int y0, int x1, int y1, const int step, gint64 s[5])
++{
++  if (step == 1 || !a->sat || !b->sat || !b->full)
++    return layer_sums_general (a, b, dx, dy, x0, y0, x1, y1, step, s);
++  if (x1 <= x0 || y1 <= y0)
++    {
++      s[0] = s[1] = s[2] = s[3] = s[4] = 0;
++      return 0;
++    }
++  return layer_sums_fullb (a, b, dx, dy, x0, y0, x1, y1,
++                           a->full, s);
++}
++
++static double
++ncc_from_sums (const gint64 s[5], int n)
++{
++  double ma = (double) s[0] / n, mb = (double) s[1] / n;
++  double va = (double) s[2] / n - ma * ma;
++  double vb = (double) s[3] / n - mb * mb;
++  double cov = (double) s[4] / n - ma * mb;
++
++  if (va <= 1e-9 || vb <= 1e-9)
++    return -2.0;
++  return cov / sqrt (va * vb);
 +}
 +
 +/* NCC of a (fixed) against b shifted by (dx, dy): a(x, y) pairs with
@@ -404,50 +1085,20 @@ index 00000000..d03ee53d
 +{
 +  int x0 = MAX (0, dx), x1 = MIN (a->w, b->w + dx);
 +  int y0 = MAX (0, dy), y1 = MIN (a->h, b->h + dy);
-+  gint64 sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
-+  int n = 0;
-+  double ma, mb, va, vb, cov;
++  gint64 s[5];
++  int n;
 +
 +  if (x1 - x0 <= 0 || y1 - y0 <= 0)
 +    return -2.0;
 +  if ((x1 - x0) * (y1 - y0) < min_n)
 +    return -2.0;
 +
-+  for (int y = y0; y < y1; y++)
-+    {
-+      const gint16 *av = a->v + y * a->w;
-+      const guint8 *am = a->m + y * a->w;
-+      const gint16 *bv = b->v + (y - dy) * b->w - dx;
-+      const guint8 *bm = b->m + (y - dy) * b->w - dx;
-+
-+      for (int x = x0; x < x1; x++)
-+        {
-+          if (am[x] && bm[x])
-+            {
-+              int p = av[x], q = bv[x];
-+              sa += p;
-+              sb += q;
-+              saa += p * p;
-+              sbb += q * q;
-+              sab += p * q;
-+              n++;
-+            }
-+        }
-+    }
-+
++  n = layer_sums (a, b, dx, dy, x0, y0, x1, y1, VEC, s);
 +  if (n_out)
 +    *n_out = n;
 +  if (n < min_n)
 +    return -2.0;
-+
-+  ma = (double) sa / n;
-+  mb = (double) sb / n;
-+  va = (double) saa / n - ma * ma;
-+  vb = (double) sbb / n - mb * mb;
-+  cov = (double) sab / n - ma * mb;
-+  if (va <= 1e-9 || vb <= 1e-9)
-+    return -2.0;
-+  return cov / sqrt (va * vb);
++  return ncc_from_sums (s, n);
 +}
 +
 +/* NCC of a against shifted b restricted to the a-rectangle [x0,x1)x[y0,y1) */
@@ -455,43 +1106,17 @@ index 00000000..d03ee53d
 +layer_ncc_rect (const Layer *a, const Layer *b, int dx, int dy,
 +                int x0, int y0, int x1, int y1, int min_n)
 +{
-+  gint64 sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
-+  int n = 0;
-+  double ma, mb, va, vb, cov;
++  gint64 s[5];
++  int n;
 +
 +  x0 = MAX (x0, MAX (0, dx));
 +  x1 = MIN (x1, MIN (a->w, b->w + dx));
 +  y0 = MAX (y0, MAX (0, dy));
 +  y1 = MIN (y1, MIN (a->h, b->h + dy));
-+  for (int y = y0; y < y1; y++)
-+    {
-+      const gint16 *av = a->v + y * a->w;
-+      const guint8 *am = a->m + y * a->w;
-+      const gint16 *bv = b->v + (y - dy) * b->w - dx;
-+      const guint8 *bm = b->m + (y - dy) * b->w - dx;
-+
-+      for (int x = x0; x < x1; x++)
-+        if (am[x] && bm[x])
-+          {
-+            int p = av[x], q = bv[x];
-+            sa += p;
-+            sb += q;
-+            saa += p * p;
-+            sbb += q * q;
-+            sab += p * q;
-+            n++;
-+          }
-+    }
++  n = layer_sums (a, b, dx, dy, x0, y0, x1, y1, 1, s);
 +  if (n < min_n)
 +    return -2.0;
-+  ma = (double) sa / n;
-+  mb = (double) sb / n;
-+  va = (double) saa / n - ma * ma;
-+  vb = (double) sbb / n - mb * mb;
-+  cov = (double) sab / n - ma * mb;
-+  if (va <= 1e-9 || vb <= 1e-9)
-+    return -2.0;
-+  return cov / sqrt (va * vb);
++  return ncc_from_sums (s, n);
 +}
 +
 +/* consistency of the peak alignment over a 3x3 grid of the overlap */
@@ -560,7 +1185,16 @@ index 00000000..d03ee53d
 +        layer_rotated (&pr->full[i], img, w, h, pr->angles[i]);
 +      layer_half (&pr->half[i], &pr->full[i]);
 +      layer_half (&pr->quarter[i], &pr->half[i]);
++      layer_build_tables (&pr->full[i]);
++      layer_build_tables (&pr->half[i]);
++      layer_build_tables (&pr->quarter[i]);
 +    }
++#ifdef ELANPRESS_DISPATCH
++  /* read FP_ELANPRESS_SIMD here rather than in a match worker */
++  cross_sums_level ();
++#else
++  simd_env_unused ();
++#endif
 +  return pr;
 +}
 +
@@ -580,6 +1214,12 @@ index 00000000..d03ee53d
 +  g_free (pr->quarter);
 +  g_free (pr->angles);
 +  g_free (pr);
++}
++
++int
++elanpress_probe_n_rotations (const ElanpressProbe *pr)
++{
++  return pr->n_rot;
 +}
 +
 +typedef struct
@@ -618,6 +1258,61 @@ index 00000000..d03ee53d
 +    }
 +}
 +
++/* Keeps up to k quarter-resolution peaks of one rotation more than 2
++ * pixels apart, so one broad peak can't take every window: a better offset
++ * replaces every slot within 2 pixels, a worse one is dropped. What is kept
++ * depends on scan order, since a dropped peak doesn't come back when the
++ * one that beat it is replaced. */
++static void
++peak_insert (Cand *c, int k, double score, int rot, int dx, int dy)
++{
++  int slot = -1;
++
++  for (int i = 0; i < k; i++)
++    if (c[i].rot >= 0 && abs (c[i].dx - dx) <= 2 && abs (c[i].dy - dy) <= 2 &&
++        c[i].score >= score)
++      return;
++  for (int i = 0; i < k; i++)
++    if (c[i].rot >= 0 && abs (c[i].dx - dx) <= 2 && abs (c[i].dy - dy) <= 2)
++      {
++        c[i] = (Cand){ -3.0, -1, 0, 0 };
++        slot = i;
++      }
++  if (slot < 0)
++    {
++      slot = 0;
++      for (int i = 1; i < k; i++)
++        if (c[i].score < c[slot].score)
++          slot = i;
++      if (c[slot].score >= score)
++        return;
++    }
++  c[slot] = (Cand){ score, rot, dx, dy };
++}
++
++/* The overlap, in pixels of each layer, that a placement needs at each
++ * resolution: min_overlap's share of the probe, and at least the floor */
++typedef struct
++{
++  int full, half, quarter;
++  int peak;  /* for quarter-resolution peaks */
++} MinOverlap;
++
++static void
++min_overlap_pixels (const ElanpressProbe *pr, MinOverlap *m)
++{
++  double share = pr->p.min_overlap;
++
++  m->full = MAX ((int) (share * pr->w * pr->h), MIN_OVERLAP_PIXELS);
++  m->half = MAX ((int) (share * pr->half[0].w * pr->half[0].h), MIN_OVERLAP_PIXELS / 4);
++  m->quarter = MAX ((int) (share * pr->quarter[0].w * pr->quarter[0].h),
++                    MIN_OVERLAP_PIXELS / 4);
++  /* The masked corners of a rotated probe grow at each halving, so an
++   * offset just above min_overlap at half resolution can fall below it
++   * at quarter resolution. Peaks get a 10% margin. */
++  m->peak = MAX (m->quarter * 9 / 10, MIN_OVERLAP_PIXELS / 4);
++}
++
 +double
 +elanpress_probe_match_canvas (const ElanpressProbe *pr, const guint8 *px,
 +                              const guint8 *mask, int tw, int th,
@@ -627,20 +1322,25 @@ index 00000000..d03ee53d
 +  int k = MAX (pr->p.candidates, 1);
 +  Cand *cands = g_new (Cand, k);
 +  int pw = pr->half[0].w, ph = pr->half[0].h;
-+  int hw, hh, mw, mh, min_n_half, min_n_full, best_cand = -1;
++  int hw, hh, mw, mh, best_cand = -1;
++  MinOverlap min_n;
 +  float *maps = NULL;
 +  ElanpressMatchResult best = { -2.0, -2.0, -2.0, -1.0, -1.0, 0, 0, 0.0, 0 };
 +  int best_rot_idx = -1;
++  guint8 *visit = NULL;
 +
 +  layer_from_image (&tfull, px, mask, tw, th);
 +  layer_half (&thalf, &tfull);
++  if (tfull.full)
++    layer_build_tables (&tfull);
++  if (thalf.full)
++    layer_build_tables (&thalf);
 +  hw = thalf.w;
 +  hh = thalf.h;
 +  /* offsets range over every placement with any overlap */
 +  mw = pw + hw - 1;
 +  mh = ph + hh - 1;
-+  min_n_half = (int) (pr->p.min_overlap * pw * ph);
-+  min_n_full = (int) (pr->p.min_overlap * pr->w * pr->h);
++  min_overlap_pixels (pr, &min_n);
 +  if (pr->p.score_mode != 0)
 +    {
 +      maps = g_new (float, (size_t) pr->n_rot * mw * mh);
@@ -660,6 +1360,11 @@ index 00000000..d03ee53d
 +   * best few for the real search. Ranking is all that is needed here. */
 +  gboolean *use_rot = g_new (gboolean, pr->n_rot);
 +  int keep = pr->p.rot_prefilter;
++  /* The sidelobe modes need the half-resolution map at every offset. A
++   * masked canvas loses too many valid pixels at quarter scale for its
++   * peaks to point at the right half-resolution offsets. */
++  int n_peaks = ELANPRESS_PEAKS_OFF (maps, mask) ? 0 : pr->p.coarse_peaks;
++  Cand *peaks = NULL;
 +
 +  for (int r = 0; r < pr->n_rot; r++)
 +    use_rot[r] = TRUE;
@@ -667,12 +1372,22 @@ index 00000000..d03ee53d
 +    {
 +      Layer tquarter;
 +      double *qbest = g_new (double, pr->n_rot);
-+      int qw, qh, min_n_quarter;
++      int qw, qh, min_n_quarter, min_n_peak;
++
++      if (n_peaks > 0)
++        {
++          peaks = g_new (Cand, (size_t) pr->n_rot * n_peaks);
++          for (int i = 0; i < pr->n_rot * n_peaks; i++)
++            peaks[i] = (Cand){ -3.0, -1, 0, 0 };
++        }
 +
 +      layer_half (&tquarter, &thalf);
++      if (tquarter.full)
++        layer_build_tables (&tquarter);
 +      qw = tquarter.w;
 +      qh = tquarter.h;
-+      min_n_quarter = (int) (pr->p.min_overlap * pr->quarter[0].w * pr->quarter[0].h);
++      min_n_quarter = min_n.quarter;
++      min_n_peak = peaks ? min_n.peak : min_n_quarter;
 +      for (int r = 0; r < pr->n_rot; r++)
 +        {
 +          const Layer *p_q = &pr->quarter[r];
@@ -681,9 +1396,13 @@ index 00000000..d03ee53d
 +          for (int dy = -(qh - 1); dy <= p_q->h - 1; dy++)
 +            for (int dx = -(qw - 1); dx <= p_q->w - 1; dx++)
 +              {
-+                double s = layer_ncc (p_q, &tquarter, dx, dy, min_n_quarter, NULL);
-+                if (s > qbest[r])
++                int n = 0;
++                double s = layer_ncc (p_q, &tquarter, dx, dy, min_n_peak, &n);
++
++                if (n >= min_n_quarter && s > qbest[r])
 +                  qbest[r] = s;
++                if (peaks && s > -2.0)
++                  peak_insert (peaks + r * n_peaks, n_peaks, s, r, dx, dy);
 +              }
 +          use_rot[r] = FALSE;
 +        }
@@ -701,26 +1420,70 @@ index 00000000..d03ee53d
 +      layer_clear (&tquarter);
 +    }
 +
-+  /* coarse: selected rotations, every translation, at half resolution.
-+   * probe(x, y) pairs with canvas(x - dx, y - dy). */
++  /* coarse: selected rotations at half resolution, every translation or,
++   * with quarter-resolution peaks, only the offsets around them. A real
++   * match has a strong peak that survives the quarter scale; this mostly
++   * skips chance alignments. probe(x, y) pairs with canvas(x - dx, y - dy). */
++  if (peaks)
++    visit = g_new (guint8, (size_t) mw * mh);
++
 +  for (int r = 0; r < pr->n_rot; r++)
 +    {
 +      const Layer *p_h = &pr->half[r];
++      gboolean windowed = FALSE;
 +
 +      if (!use_rot[r])
 +        continue;
 +
-+      for (int dy = -(hh - 1); dy <= ph - 1; dy++)
-+        for (int dx = -(hw - 1); dx <= pw - 1; dx++)
-+          {
-+            double s = layer_ncc (p_h, &thalf, dx, dy, min_n_half, NULL);
-+            if (s > -2.0)
++      if (visit)
++        {
++          /* a quarter offset q is a half offset within 2q +/- 1; two more
++           * pixels of margin for the peak moving between scales */
++          const int R = ELANPRESS_PEAK_RADIUS;
++
++          memset (visit, 0, (size_t) mw * mh);
++          for (int i = 0; i < n_peaks; i++)
++            {
++              const Cand *c = &peaks[r * n_peaks + i];
++
++              if (c->rot < 0)
++                continue;
++              windowed = TRUE;
++              for (int dy = MAX (2 * c->dy - R, -(hh - 1)); dy <= MIN (2 * c->dy + R, ph - 1); dy++)
++                for (int dx = MAX (2 * c->dx - R, -(hw - 1)); dx <= MIN (2 * c->dx + R, pw - 1); dx++)
++                  visit[(dy + hh - 1) * mw + (dx + hw - 1)] = 1;
++            }
++        }
++
++      for (;;)
++        {
++          gboolean found = FALSE;
++
++          for (int dy = -(hh - 1); dy <= ph - 1; dy++)
++            for (int dx = -(hw - 1); dx <= pw - 1; dx++)
 +              {
-+                if (maps)
-+                  maps[((size_t) r * mh + (dy + hh - 1)) * mw + (dx + hw - 1)] = (float) s;
-+                cand_insert (cands, k, s, r, dx, dy);
++                double s;
++
++                if (windowed && !visit[(dy + hh - 1) * mw + (dx + hw - 1)])
++                  continue;
++                s = layer_ncc (p_h, &thalf, dx, dy, min_n.half, NULL);
++                if (s > -2.0)
++                  {
++                    found = TRUE;
++                    if (maps)
++                      maps[((size_t) r * mh + (dy + hh - 1)) * mw + (dx + hw - 1)] = (float) s;
++                    cand_insert (cands, k, s, r, dx, dy);
++                  }
 +              }
-+          }
++          /* Peaks at a marginal quarter overlap can leave every offset in
++           * the windows short of min_n.half or flat (zero variance), and a
++           * rotation can have no quarter peak at all; search the whole
++           * rotation then. */
++          if (found || !windowed)
++            break;
++          ELANPRESS_COUNT_FALLBACK ();
++          windowed = FALSE;
++        }
 +    }
 +
 +  /* fine: refine each candidate at full resolution */
@@ -735,7 +1498,7 @@ index 00000000..d03ee53d
 +        for (int dx = 2 * cands[i].dx - 2; dx <= 2 * cands[i].dx + 2; dx++)
 +          {
 +            int n = 0;
-+            double s = layer_ncc (pf, &tfull, dx, dy, min_n_full, &n);
++            double s = layer_ncc (pf, &tfull, dx, dy, min_n.full, &n);
 +
 +            if (s > best.peak)
 +              {
@@ -794,6 +1557,8 @@ index 00000000..d03ee53d
 +                 pr->p.block_weight * best.block_min;
 +
 +  g_free (use_rot);
++  g_free (peaks);
++  g_free (visit);
 +  g_free (maps);
 +  g_free (cands);
 +  layer_clear (&tfull);
@@ -884,11 +1649,11 @@ index 00000000..d03ee53d
 +      {
 +        int cx = x0 + x, cy = y0 + y;
 +
-+        if (!l.m[y * w + x])
++        if (!l.m[y * l.stride + x])
 +          continue;
 +        if (c->mask[cy * c->w + cx])
 +          continue;
-+        c->px[cy * c->w + cx] = (guint8) (l.v[y * w + x] + 128);
++        c->px[cy * c->w + cx] = (guint8) (l.v[y * l.stride + x] + 128);
 +        c->mask[cy * c->w + cx] = 1;
 +      }
 +  layer_clear (&l);
@@ -1081,10 +1846,10 @@ index 00000000..d03ee53d
 +}
 diff --git a/libfprint/drivers/elanpress-match.h b/libfprint/drivers/elanpress-match.h
 new file mode 100644
-index 00000000..5f490bdb
+index 0000000..4ec2e4d
 --- /dev/null
 +++ b/libfprint/drivers/elanpress-match.h
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,238 @@
 +/*
 + * Image processing and correlation matching for ELAN press-type sensors
 + *
@@ -1117,6 +1882,41 @@ index 00000000..5f490bdb
 +  double coverage;  /* fraction of pixels carrying ridge texture, 0..1 */
 +} ElanpressQuality;
 +
++/* quality gates on a frame; raw sensor units. A finger raises the mean by
++ * roughly 1500 on the 0c3d pad. The coverage gate rejects a finger that
++ * only half landed on the small 0c3d pad; on larger pads (0c63, 80x80)
++ * every full press saturates it at 1.00, which is expected, not a signal.
++ * All are env-tunable, see elanpress_gates_from_env () */
++#define ELANPRESS_MIN_MEAN 150.0
++#define ELANPRESS_MIN_CONTRAST 40.0
++#define ELANPRESS_MIN_COVERAGE 0.35
++
++/* frames captured per touch, at most */
++#define ELANPRESS_MAX_FRAMES 14
++/* touches stored during enrollment, at most */
++#define ELANPRESS_MAX_ENROLL_STAGES 40
++
++/* Per-device defaults. Each set was measured on one physical pad and is
++ * provisional; FP_ELANPRESS_THRESHOLD, FP_ELANPRESS_ENROLL_STAGES,
++ * FP_ELANPRESS_IMAGES_PER_TOUCH and FP_ELANPRESS_DUP_SIMILARITY override
++ * them at runtime. driver_data indexes elanpress_devices[]. */
++typedef struct
++{
++  double threshold;        /* accept when the best score reaches this */
++  int    enroll_stages;    /* touches stored during enrollment */
++  int    images_per_touch; /* distinct images an enroll touch keeps */
++  double dup_similarity;   /* zero-shift similarity above which two frames
++                            * of a touch are duplicates */
++} ElanpressDeviceConfig;
++
++/* absolute per-frame quality gates, same units as ElanpressQuality */
++typedef struct
++{
++  double min_mean;
++  double min_contrast;
++  double min_coverage;
++} ElanpressGates;
++
 +typedef struct
 +{
 +  double rot_range;    /* degrees, search is +/- this */
@@ -1130,6 +1930,10 @@ index 00000000..5f490bdb
 +  double block_weight; /* score = (1-w) * peak + w * block_min */
 +  int    rot_prefilter; /* rank rotations at quarter resolution, search only
 +                         * the best this many at half/full; 0 = all */
++  int    coarse_peaks; /* with the rotation prefilter, score_mode 0 and an
++                        * unmasked template: search half resolution only
++                        * around this many quarter-resolution peaks per
++                        * rotation; 0 = every offset */
 +  double reg_thresh;   /* mosaic: registration score needed to merge an image */
 +  int    max_side;     /* mosaic: canvas side limit, px */
 +} ElanpressMatchParams;
@@ -1146,10 +1950,30 @@ index 00000000..5f490bdb
 +  int    overlap;      /* pixels that took part in the score */
 +} ElanpressMatchResult;
 +
++/* bounds on FP_ELANPRESS_ROT_RANGE and _ROT_STEP, degrees; at most 181
++ * rotations against 15 by default. Each keeps a full, half and quarter
++ * layer of about 4 bytes per frame pixel, about 5.5 MB per probe on a
++ * 150x52 pad */
++#define ELANPRESS_MAX_ROT_RANGE 90.0
++#define ELANPRESS_MIN_ROT_STEP 1.0
++
++/* each candidate is refined at full resolution and the array is sized by
++ * the count, so FP_ELANPRESS_CANDIDATES stops here; the default is 4 */
++#define ELANPRESS_MAX_CANDIDATES 64
++
 +typedef struct _ElanpressProbe ElanpressProbe;
 +
 +void      elanpress_match_params_default (ElanpressMatchParams *p);
 +void      elanpress_match_params_from_env (ElanpressMatchParams *p);
++
++/* override a device's defaults, or the default gates, from the environment */
++void      elanpress_device_config_from_env (ElanpressDeviceConfig *cfg);
++void      elanpress_gates_from_env (ElanpressGates *g);
++
++/* a number from the environment; def when the variable is unset, empty,
++ * not a number or not finite, and the rejected value is logged */
++double    elanpress_env_double (const char *name,
++                                double      def);
 +
 +/* wire format -> row-major 16-bit frame */
 +void      elanpress_rotate_frame (const guint8 *raw,
@@ -1172,6 +1996,22 @@ index 00000000..5f490bdb
 +                                 double        *mean,
 +                                 double        *stddev);
 +
++gboolean  elanpress_quality_passes (const ElanpressQuality *q,
++                                    const ElanpressGates   *g);
++
++/* half the best contrast among the frames of a touch that pass the gates,
++ * 0 when none do; frames under it are dropped */
++double    elanpress_contrast_bar (const ElanpressQuality *q,
++                                  guint                   n,
++                                  const ElanpressGates   *g);
++
++/* sets pass[i] for each of the n frames of a touch that clears both the
++ * gates and the contrast bar */
++void      elanpress_frames_pass (const ElanpressQuality *q,
++                                 guint                   n,
++                                 const ElanpressGates   *g,
++                                 gboolean               *pass);
++
 +/* zero-shift normalised cross-correlation of two processed images, -1..1 */
 +double    elanpress_similarity (const guint8 *a,
 +                                const guint8 *b,
@@ -1183,6 +2023,9 @@ index 00000000..5f490bdb
 +                                     int                         h,
 +                                     const ElanpressMatchParams *p);
 +void      elanpress_probe_free (ElanpressProbe *probe);
++
++/* rotated copies of the probe the search goes through */
++int       elanpress_probe_n_rotations (const ElanpressProbe *probe);
 +
 +/* best correlation of the probe against one template image */
 +double    elanpress_probe_match (const ElanpressProbe *probe,
@@ -1247,10 +2090,10 @@ index 00000000..5f490bdb
 +                                int        *h);
 diff --git a/libfprint/drivers/elanpress.c b/libfprint/drivers/elanpress.c
 new file mode 100644
-index 00000000..cb4f6954
+index 0000000..8289cd6
 --- /dev/null
 +++ b/libfprint/drivers/elanpress.c
-@@ -0,0 +1,1100 @@
+@@ -0,0 +1,1230 @@
 +/*
 + * Driver for ELAN press-type (touch) fingerprint sensors
 + *
@@ -1277,6 +2120,7 @@ index 00000000..cb4f6954
 +
 +#include <math.h>
 +#include <stdlib.h>
++#include <string.h>
 +
 +static const guint8 cmd_get_fw_ver[ELANPRESS_CMD_LEN] = {0x40, 0x19};
 +static const guint8 cmd_get_sensor_dim[ELANPRESS_CMD_LEN] = {0x00, 0x0c};
@@ -1293,6 +2137,7 @@ index 00000000..cb4f6954
 +  guint16              fw_ver;
 +  int                  frame_width;
 +  int                  frame_height;
++  gboolean             reread_short;
 +
 +  ElanpressMatchParams params;
 +  double               min_mean;
@@ -1304,6 +2149,10 @@ index 00000000..cb4f6954
 +
 +  /* raw background frame (no finger), row-major */
 +  guint16 *background;
++  /* last background that passed the check, used when a capture starts
++   * with the finger on the pad. It outlives close because fprintd closes
++   * the device after every verify. */
++  guint16 *clean_background;
 +  guint16  calib_mean;
 +  int      bg_attempts;
 +
@@ -1316,7 +2165,11 @@ index 00000000..cb4f6954
 +  /* processed images collected during enrollment */
 +  GPtrArray *enroll_images;
 +  int        enroll_stage;
-+  int        enroll_stages;
++
++  /* per-device settings, see elanpress_load_config () */
++  int    enroll_stages;
++  int    images_per_touch;
++  double dup_similarity;
 +};
 +
 +G_DEFINE_TYPE (FpiDeviceElanPress, fpi_device_elanpress, FP_TYPE_DEVICE);
@@ -1364,6 +2217,7 @@ index 00000000..cb4f6954
 +  guint8          *img;
 +  ElanpressQuality q;
 +  int              idx;
++  gboolean         pass; /* passes the quality gates and the contrast bar */
 +} Processed;
 +
 +static void
@@ -1397,8 +2251,12 @@ index 00000000..cb4f6954
 +
 +  g_autoptr(GPtrArray) all = g_ptr_array_new_with_free_func (processed_free);
 +  GPtrArray *keep = g_ptr_array_new_with_free_func (g_free);
++  g_autofree ElanpressQuality *qs = g_new (ElanpressQuality, self->num_frames);
++  g_autofree gboolean *pass = g_new (gboolean, self->num_frames);
++  const ElanpressGates gates = {
++    self->min_mean, self->min_contrast, self->min_coverage
++  };
 +  int idx = self->num_frames;
-+  double best_contrast = 0;
 +
 +  /* the list is newest-first; number frames in capture order */
 +  for (GSList *l = self->frames; l; l = l->next)
@@ -1412,10 +2270,15 @@ index 00000000..cb4f6954
 +      elanpress_dump16 (self, "raw", idx, l->data);
 +      fp_dbg ("frame %d: mean %.0f contrast %.1f coverage %.2f",
 +              idx, p->q.mean, p->q.contrast, p->q.coverage);
-+      best_contrast = MAX (best_contrast, p->q.contrast);
++      qs[all->len] = p->q;
 +      g_ptr_array_add (all, p);
 +    }
 +
++  /* qs[] and pass[] follow all[], newest frame first; copy each result to
++   * its frame before the sort reorders all[] */
++  elanpress_frames_pass (qs, all->len, &gates, pass);
++  for (guint i = 0; i < all->len; i++)
++    ((Processed *) g_ptr_array_index (all, i))->pass = pass[i];
 +  g_ptr_array_sort (all, processed_cmp);
 +
 +  for (guint i = 0; i < all->len && (int) keep->len < max_keep; i++)
@@ -1423,9 +2286,7 @@ index 00000000..cb4f6954
 +      Processed *p = g_ptr_array_index (all, i);
 +      gboolean dup = FALSE;
 +
-+      if (p->q.mean < self->min_mean || p->q.contrast < self->min_contrast ||
-+          p->q.coverage < self->min_coverage ||
-+          p->q.contrast < 0.5 * best_contrast)
++      if (!p->pass)
 +        {
 +          fp_dbg ("frame %d rejected by quality gate", p->idx);
 +          continue;
@@ -1435,7 +2296,7 @@ index 00000000..cb4f6954
 +        {
 +          double s = elanpress_similarity (p->img, g_ptr_array_index (keep, j), w, h);
 +
-+          if (s > ELANPRESS_DUP_SIMILARITY)
++          if (s > self->dup_similarity)
 +            {
 +              dup = TRUE;
 +              break;
@@ -1696,17 +2557,73 @@ index 00000000..cb4f6954
 +}
 +
 +static void
-+elanpress_read (FpiSsm *ssm, FpDevice *dev, guint8 ep, gsize len,
-+                guint timeout, FpiUsbTransferCallback callback)
++elanpress_submit_read (FpiSsm *ssm, FpDevice *dev, guint8 ep, gsize len,
++                       guint timeout, FpiUsbTransferCallback callback,
++                       gpointer user_data)
 +{
 +  FpiUsbTransfer *transfer = fpi_usb_transfer_new (dev);
 +
 +  transfer->ssm = ssm;
-+  transfer->short_is_error = TRUE;
 +  fpi_usb_transfer_fill_bulk (transfer, ep, len);
 +  fpi_usb_transfer_submit (transfer, timeout,
 +                           fpi_device_get_cancellable (dev),
-+                           callback, NULL);
++                           callback, user_data);
++}
++
++/* short_is_error only catches a reply that is short but not empty. An
++ * empty one would leave the zeroed buffer to be read as data: as an
++ * all-zero frame, a calibration mean of 0 or firmware 0x0000. So the
++ * length is checked here instead.
++ *
++ * A pre-scan that the stop command cancelled may still answer on the
++ * command endpoint, with its one status byte or with nothing. So a short
++ * reply there is read past once before it counts as an error, and so is
++ * no reply after it */
++static void
++elanpress_read_cb (FpiUsbTransfer *transfer, FpDevice *dev,
++                   gpointer user_data, GError *error)
++{
++  FpiDeviceElanPress *self = FPI_DEVICE_ELANPRESS (dev);
++  FpiUsbTransferCallback callback = user_data;
++
++  if (!error && transfer->actual_length < transfer->length)
++    {
++      if (transfer->endpoint == ELANPRESS_EP_CMD_IN && !self->reread_short)
++        {
++          fp_dbg ("%zd of %zd bytes on endpoint 0x%02x, reading again",
++                  transfer->actual_length, transfer->length,
++                  transfer->endpoint);
++          self->reread_short = TRUE;
++          elanpress_submit_read (transfer->ssm, dev, transfer->endpoint,
++                                 transfer->length, ELANPRESS_CMD_TIMEOUT,
++                                 elanpress_read_cb, user_data);
++          return;
++        }
++      error = fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
++                                        "Short reply on endpoint 0x%02x: %zd of %zd bytes",
++                                        transfer->endpoint,
++                                        transfer->actual_length,
++                                        transfer->length);
++    }
++  else if (self->reread_short &&
++           g_error_matches (error, G_USB_DEVICE_ERROR,
++                            G_USB_DEVICE_ERROR_TIMED_OUT))
++    {
++      g_clear_error (&error);
++      error = fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
++                                        "Short reply on endpoint 0x%02x, then none",
++                                        transfer->endpoint);
++    }
++  self->reread_short = FALSE;
++  callback (transfer, dev, NULL, error);
++}
++
++static void
++elanpress_read (FpiSsm *ssm, FpDevice *dev, guint8 ep, gsize len,
++                guint timeout, FpiUsbTransferCallback callback)
++{
++  elanpress_submit_read (ssm, dev, ep, len, timeout,
++                         elanpress_read_cb, (gpointer) callback);
 +}
 +
 +/* === touch capture state machine === */
@@ -1868,14 +2785,28 @@ index 00000000..cb4f6954
 +
 +    case CAPTURE_BG_CHECK:
 +      self->bg_attempts++;
-+      if (!elanpress_background_ok (self))
++      if (elanpress_background_ok (self))
 +        {
-+          if (self->bg_attempts < ELANPRESS_BG_ATTEMPTS)
-+            {
-+              fp_dbg ("finger still on the pad, waiting for a clean background");
-+              fpi_ssm_jump_to_state_delayed (ssm, CAPTURE_CALIB_MEAN_SEND, 150);
-+              break;
-+            }
++          g_free (self->clean_background);
++          self->clean_background = g_memdup2 (self->background,
++                                              frame_bytes);
++        }
++      else if (self->bg_attempts < (self->clean_background ?
++                                    ELANPRESS_BG_ATTEMPTS :
++                                    ELANPRESS_BG_ATTEMPTS_FIRST))
++        {
++          fp_dbg ("finger still on the pad, waiting for a clean background");
++          fpi_ssm_jump_to_state_delayed (ssm, CAPTURE_CALIB_MEAN_SEND, 150);
++          break;
++        }
++      else if (self->clean_background)
++        {
++          fp_dbg ("no clean background after %d attempts, reusing the last one",
++                  self->bg_attempts);
++          memcpy (self->background, self->clean_background, frame_bytes);
++        }
++      else
++        {
 +          fp_warn ("no clean background after %d attempts, using it anyway",
 +                   self->bg_attempts);
 +        }
@@ -1895,10 +2826,12 @@ index 00000000..cb4f6954
 +      break;
 +
 +    case CAPTURE_WAIT_ON_READ:
-+      elanpress_read (ssm, dev, ELANPRESS_EP_CMD_IN, 1,
-+                      self->num_frames > 0 ? ELANPRESS_FINGER_GONE_TIMEOUT :
-+                      ELANPRESS_WAIT_FINGER_TIMEOUT,
-+                      elanpress_status_cb);
++      /* the pre-scan may answer with nothing, which reads as no finger */
++      elanpress_submit_read (ssm, dev, ELANPRESS_EP_CMD_IN, 1,
++                             self->num_frames > 0 ?
++                             ELANPRESS_FINGER_GONE_TIMEOUT :
++                             ELANPRESS_WAIT_FINGER_TIMEOUT,
++                             elanpress_status_cb, NULL);
 +      break;
 +
 +    case CAPTURE_FRAME_DECIDE:
@@ -1998,7 +2931,7 @@ index 00000000..cb4f6954
 +      return;
 +    }
 +
-+  images = elanpress_process_touch (self, ELANPRESS_MAX_IMAGES_PER_TOUCH);
++  images = elanpress_process_touch (self, self->images_per_touch);
 +  elanpress_reset_capture (self);
 +
 +  if (images->len == 0)
@@ -2237,20 +3170,55 @@ index 00000000..cb4f6954
 +static void
 +open_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
 +{
++  FpiDeviceElanPress *self = FPI_DEVICE_ELANPRESS (dev);
++
++  /* close doesn't run after a failed open, so undo what open did here,
++   * or the interface stays claimed while the FpDevice lives */
++  if (error)
++    {
++      g_clear_pointer (&self->dump_dir, g_free);
++      g_clear_pointer (&self->dump_session, g_free);
++      g_usb_device_release_interface (fpi_device_get_usb_device (dev),
++                                      0, 0, NULL);
++    }
 +  fpi_device_open_complete (dev, error);
 +}
 +
-+static double
-+env_double_default (const char *name, double def)
++/* The device's defaults from elanpress_devices[] and the matcher's, or their
++ * env overrides. Probe reads them once, so the number of enroll stages is
++ * right before the device is first opened and a bad value is logged once,
++ * not at every open */
++static void
++elanpress_load_config (FpiDeviceElanPress *self)
 +{
-+  const char *v = g_getenv (name);
-+  char *end;
-+  double d;
++  FpDevice *dev = FP_DEVICE (self);
++  guint64 idx = fpi_device_get_driver_data (dev);
++  ElanpressDeviceConfig cfg;
++  ElanpressGates gates;
 +
-+  if (!v || !*v)
-+    return def;
-+  d = g_ascii_strtod (v, &end);
-+  return end == v ? def : d;
++  g_assert (idx < G_N_ELEMENTS (elanpress_devices));
++  cfg = elanpress_devices[idx];
++  elanpress_device_config_from_env (&cfg);
++  elanpress_match_params_from_env (&self->params);
++  elanpress_gates_from_env (&gates);
++
++  /* the threshold is the device's, so elanpress_match_params_from_env ()
++   * leaves it alone */
++  self->params.threshold = cfg.threshold;
++  self->enroll_stages = cfg.enroll_stages;
++  self->images_per_touch = cfg.images_per_touch;
++  self->dup_similarity = cfg.dup_similarity;
++  self->min_mean = gates.min_mean;
++  self->min_contrast = gates.min_contrast;
++  self->min_coverage = gates.min_coverage;
++  fpi_device_set_nr_enroll_stages (dev, self->enroll_stages);
++}
++
++static void
++elanpress_probe (FpDevice *dev)
++{
++  elanpress_load_config (FPI_DEVICE_ELANPRESS (dev));
++  fpi_device_probe_complete (dev, NULL, NULL, NULL);
 +}
 +
 +static void
@@ -2267,16 +3235,6 @@ index 00000000..cb4f6954
 +      return;
 +    }
 +
-+  elanpress_match_params_from_env (&self->params);
-+  if (fpi_device_get_driver_data (dev) != 0 && !g_getenv ("FP_ELANPRESS_THRESHOLD"))
-+    self->params.threshold = fpi_device_get_driver_data (dev) / 1000.0;
-+  self->min_mean = env_double_default ("FP_ELANPRESS_MIN_MEAN", ELANPRESS_MIN_MEAN);
-+  self->min_contrast = env_double_default ("FP_ELANPRESS_MIN_CONTRAST", ELANPRESS_MIN_CONTRAST);
-+  self->min_coverage = env_double_default ("FP_ELANPRESS_MIN_COVERAGE", ELANPRESS_MIN_COVERAGE);
-+  self->enroll_stages = (int) env_double_default ("FP_ELANPRESS_ENROLL_STAGES", ELANPRESS_ENROLL_STAGES);
-+  self->enroll_stages = CLAMP (self->enroll_stages, 1, 40);
-+  fpi_device_set_nr_enroll_stages (dev, self->enroll_stages);
-+
 +  dump = g_getenv ("FP_ELANPRESS_DUMP_DIR");
 +  if (dump && g_file_test (dump, G_FILE_TEST_IS_DIR))
 +    {
@@ -2287,11 +3245,13 @@ index 00000000..cb4f6954
 +      fp_dbg ("dumping frames to %s (session %s)", self->dump_dir, self->dump_session);
 +    }
 +
-+  fp_dbg ("threshold %.3f rot +/-%.0f step %.0f min_overlap %.2f norm_win %d, "
-+          "gates mean>%.0f contrast>%.0f coverage>%.2f, %d enroll stages",
++  fp_dbg ("threshold %.3f rot +/-%g step %g min_overlap %.2f norm_win %d, "
++          "gates mean>%.0f contrast>%.0f coverage>%.2f, %d enroll stages "
++          "keeping %d images per touch, duplicates above %.2f",
 +          self->params.threshold, self->params.rot_range, self->params.rot_step,
 +          self->params.min_overlap, self->params.norm_win, self->min_mean,
-+          self->min_contrast, self->min_coverage, self->enroll_stages);
++          self->min_contrast, self->min_coverage, self->enroll_stages,
++          self->images_per_touch, self->dup_similarity);
 +
 +  fpi_ssm_start (fpi_ssm_new (dev, open_run_state, OPEN_NUM_STATES),
 +                 open_complete);
@@ -2328,9 +3288,21 @@ index 00000000..cb4f6954
 +}
 +
 +static void
++fpi_device_elanpress_finalize (GObject *object)
++{
++  FpiDeviceElanPress *self = FPI_DEVICE_ELANPRESS (object);
++
++  g_clear_pointer (&self->clean_background, g_free);
++
++  G_OBJECT_CLASS (fpi_device_elanpress_parent_class)->finalize (object);
++}
++
++static void
 +fpi_device_elanpress_class_init (FpiDeviceElanPressClass *klass)
 +{
 +  FpDeviceClass *dev_class = FP_DEVICE_CLASS (klass);
++
++  G_OBJECT_CLASS (klass)->finalize = fpi_device_elanpress_finalize;
 +
 +  dev_class->id = "elanpress";
 +  dev_class->full_name = "ElanTech press-type fingerprint sensor";
@@ -2342,6 +3314,7 @@ index 00000000..cb4f6954
 +   * thermal model only ever tripped on its own retry loops */
 +  dev_class->temp_hot_seconds = -1;
 +
++  dev_class->probe = elanpress_probe;
 +  dev_class->open = elanpress_open;
 +  dev_class->close = elanpress_close;
 +  dev_class->enroll = elanpress_enroll;
@@ -2353,10 +3326,10 @@ index 00000000..cb4f6954
 +}
 diff --git a/libfprint/drivers/elanpress.h b/libfprint/drivers/elanpress.h
 new file mode 100644
-index 00000000..f747e038
+index 0000000..0434d69
 --- /dev/null
 +++ b/libfprint/drivers/elanpress.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,114 @@
 +/*
 + * Driver for ELAN press-type (touch) fingerprint sensors
 + *
@@ -2385,6 +3358,7 @@ index 00000000..f747e038
 +
 +#include "fpi-device.h"
 +#include "fpi-usb-transfer.h"
++#include "elanpress-match.h"
 +
 +#define ELANPRESS_VEND_ID 0x04f3
 +
@@ -2411,15 +3385,12 @@ index 00000000..f747e038
 +
 +/* frames captured per touch */
 +#define ELANPRESS_MIN_FRAMES 3
-+#define ELANPRESS_MAX_FRAMES 14
 +
-+/* distinct images kept per touch (enroll) / used as probes (verify) */
-+#define ELANPRESS_MAX_IMAGES_PER_TOUCH 3
++/* distinct images of a touch used as probes (verify); how many an enroll
++ * touch keeps is per device, see elanpress_devices[] */
 +#define ELANPRESS_MAX_PROBES 3
-+/* zero-shift similarity above which two frames of a touch are duplicates */
-+#define ELANPRESS_DUP_SIMILARITY 0.85
 +
-+/* number of touches stored during enrollment */
++/* touches stored during enrollment, unless the device sets its own */
 +#define ELANPRESS_ENROLL_STAGES 20
 +
 +/* a background frame is rejected (finger probably still on the pad) when
@@ -2427,36 +3398,92 @@ index 00000000..f747e038
 + * elan driver's ELAN_CALIBRATION_MAX_DELTA */
 +#define ELANPRESS_BG_MAX_DELTA 500
 +#define ELANPRESS_BG_ATTEMPTS 8
++/* used while there is no clean background to fall back on. Subtracting a
++ * dirty one ruins the touch, so wait up to ~10 s for the finger to lift. */
++#define ELANPRESS_BG_ATTEMPTS_FIRST 60
 +/* first firmware that answers the calibration-mean command */
 +#define ELANPRESS_MIN_CALIBRATION_FW 0x0138
-+
-+/* quality gates on a frame; raw sensor units. A finger raises the mean by
-+ * roughly 1500 on the 0c3d pad. The coverage gate rejects a finger that
-+ * only half landed on the small 0c3d pad; on larger pads (0c63, 80x80)
-+ * every full press saturates it at 1.00, which is expected, not a signal.
-+ * All are env-tunable, see elanpress.c */
-+#define ELANPRESS_MIN_MEAN 150.0
-+#define ELANPRESS_MIN_CONTRAST 40.0
-+#define ELANPRESS_MIN_COVERAGE 0.35
 +
 +G_DECLARE_FINAL_TYPE (FpiDeviceElanPress, fpi_device_elanpress, FPI,
 +                      DEVICE_ELANPRESS, FpDevice);
 +
-+/* driver_data carries the per-device accept threshold x 1000. Both values
-+ * are provisional: each was calibrated on one physical pad. 0c3d: 140-image
-+ * pool, one subject (0/91 impostor images accepted, ~60% of genuine
-+ * touches). 0c63: two subjects on one 80x80 pad; 0.76 admitted an unenrolled
-+ * finger there, 0.85 did not (see the merge request discussion).
-+ * FP_ELANPRESS_THRESHOLD overrides either at runtime. */
-+#define ELANPRESS_THRESHOLD(t) ((guint64) ((t) * 1000 + 0.5))
++
++enum {
++  ELANPRESS_0C3D,
++  ELANPRESS_0C4B,
++  ELANPRESS_0C63,
++  ELANPRESS_0C6E,
++};
++
++static const ElanpressDeviceConfig elanpress_devices[] = {
++  /* 64x88. 140-image pool, one subject: 0/91 impostor images accepted, ~60%
++   * of genuine touches. Re-processing that pool's raw frames, one image per
++   * enroll touch instead of three accepted a fifth fewer genuine touches,
++   * and a 0.95 duplicate cutoff changed nothing. */
++  [ELANPRESS_0C3D] = { 0.76, 20, 3, 0.85 },
++  /* 80x80, one subject. With 40 enroll touches 15/16 genuine touches were
++   * accepted (0.894 to 0.970) and 0/12 impostor touches (at most 0.758);
++   * with 20, 2/4 genuine. */
++  [ELANPRESS_0C4B] = { 0.85, 40, 3, 0.85 },
++  /* 80x80, two subjects on one pad: 0.76 admitted an unenrolled finger
++   * there, 0.85 did not (see the merge request discussion). */
++  [ELANPRESS_0C63] = { 0.85, 20, 3, 0.85 },
++  /* 150x52, two people. With these values, 15 held-out touches of the
++   * enrolled finger scored at least 0.908 and 47 touches of four other
++   * fingers and a second person at most 0.766. Most frames of one press
++   * are more than 0.85 alike, so only the higher cutoff leaves several
++   * probes per touch, and more enroll images per touch raised the best
++   * impostor score more than the genuine ones. */
++  [ELANPRESS_0C6E] = { 0.80, 20, 1, 0.95 },
++};
 +
 +static const FpIdEntry elanpress_id_table[] = {
-+  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c3d, .driver_data = ELANPRESS_THRESHOLD (0.76), },
-+  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c63, .driver_data = ELANPRESS_THRESHOLD (0.85), },
++  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c3d, .driver_data = ELANPRESS_0C3D, },
++  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c4b, .driver_data = ELANPRESS_0C4B, },
++  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c63, .driver_data = ELANPRESS_0C63, },
++  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c6e, .driver_data = ELANPRESS_0C6E, },
 +  {.vid = 0, .pid = 0, },
 +};
+diff --git a/libfprint/fpi-device.c b/libfprint/fpi-device.c
+index a1be30c..b6f8b41 100644
+--- a/libfprint/fpi-device.c
++++ b/libfprint/fpi-device.c
+@@ -1165,6 +1165,7 @@ fpi_device_probe_complete (FpDevice    *device,
+ void
+ fpi_device_open_complete (FpDevice *device, GError *error)
+ {
++  g_autoptr(GError) nested_error = NULL;
+   FpDevicePrivate *priv = fp_device_get_instance_private (device);
+ 
+   g_return_if_fail (FP_IS_DEVICE (device));
+@@ -1176,10 +1177,21 @@ fpi_device_open_complete (FpDevice *device, GError *error)
+   fpi_device_report_finger_status (device, FP_FINGER_STATUS_NONE);
+ 
+   if (!error)
+-    fpi_device_return_task_in_idle (device, FP_DEVICE_TASK_RETURN_BOOL,
+-                                    GUINT_TO_POINTER (TRUE));
+-  else
+-    fpi_device_return_task_in_idle (device, FP_DEVICE_TASK_RETURN_ERROR, error);
++    {
++      fpi_device_return_task_in_idle (device, FP_DEVICE_TASK_RETURN_BOOL,
++                                      GUINT_TO_POINTER (TRUE));
++      return;
++    }
++
++  /* fp_device_open () opened the USB device before calling the driver. The
++   * device never became open as far as the API is concerned, so no close
++   * will follow: close it here, or the handle is leaked. */
++  if (priv->type == FP_DEVICE_TYPE_USB &&
++      !g_usb_device_close (priv->usb_device, &nested_error))
++    g_warning ("Could not close the USB device after a failed open: %s",
++               nested_error->message);
++
++  fpi_device_return_task_in_idle (device, FP_DEVICE_TASK_RETURN_ERROR, error);
+ }
+ 
+ /**
 diff --git a/libfprint/meson.build b/libfprint/meson.build
-index df396e16..a1fc0703 100644
+index df396e1..a1fc070 100644
 --- a/libfprint/meson.build
 +++ b/libfprint/meson.build
 @@ -131,6 +131,8 @@ driver_sources = {
@@ -2469,7 +3496,7 @@ index df396e16..a1fc0703 100644
          [ 'drivers/elanmoc/elanmoc.c' ],
      'elanspi' :
 diff --git a/meson.build b/meson.build
-index c40805ea..6905ff4b 100644
+index c40805e..da32b75 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -134,6 +134,7 @@ default_drivers = [
@@ -2480,3 +3507,1977 @@ index c40805ea..6905ff4b 100644
      'elanmoc',
      'uru4000',
      'upektc',
+@@ -345,6 +346,35 @@ if get_option('gtk-examples')
+     endif
+ endif
+ 
++# The elanpress matcher has AVX2 and AVX-512 copies of its inner loop that it
++# picks at run time. Without these intrinsics it keeps the SSE2 copy only
++have_elanpress_avx = false
++if 'elanpress' in supported_drivers and host_machine.cpu_family() in ['x86', 'x86_64']
++    have_elanpress_avx = cc.compiles('''
++        #include <immintrin.h>
++        __attribute__((target ("avx2"))) static int
++        avx2 (const void *p)
++        {
++          __m256i x = _mm256_madd_epi16 (_mm256_loadu_si256 (p), _mm256_setzero_si256 ());
++          return _mm_cvtsi128_si32 (_mm256_extracti128_si256 (x, 1));
++        }
++        __attribute__((target ("avx512bw"))) static int
++        avx512 (const void *p)
++        {
++          __m512i x = _mm512_loadu_si512 (p);
++          return _mm512_reduce_add_epi32 (_mm512_madd_epi16 (x, x));
++        }
++        int
++        main (void)
++        {
++          char buf[64] = { 0 };
++          return __builtin_cpu_supports ("avx512bw") ? avx512 (buf) :
++                 __builtin_cpu_supports ("avx2") ? avx2 (buf) : 0;
++        }
++    ''', name: 'AVX2 and AVX-512BW intrinsics for elanpress')
++endif
++libfprint_conf.set10('HAVE_ELANPRESS_AVX', have_elanpress_avx)
++
+ # Some dependency resolving happens inside here
+ subdir('libfprint')
+ 
+diff --git a/tests/meson.build b/tests/meson.build
+index 994515d..d8bac60 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -321,6 +321,66 @@ foreach test_name: unit_tests
+     )
+ endforeach
+ 
++if 'elanpress' in supported_drivers
++    test_exe = executable('test-elanpress-match',
++        sources: [
++            'test-elanpress-match.c',
++            '../libfprint/drivers/elanpress-match.c',
++        ],
++        include_directories: [ root_inc, include_directories('../libfprint/drivers') ],
++        dependencies: [ glib_dep, mathlib_dep ],
++        c_args: common_cflags,
++        install: installed_tests,
++        install_dir: installed_tests_execdir,
++    )
++    test('elanpress-match',
++        test_exe,
++        suite: ['unit-tests'],
++        env: envs,
++    )
++
++    configure_file(
++        input: 'test.in',
++        output: 'elanpress-match.test',
++        install: installed_tests,
++        install_dir: installed_tests_testdir,
++        configuration: {
++            'exec': installed_tests_execdir / 'test-elanpress-match',
++            'env': envs_str,
++            'extra_content': '',
++        },
++    )
++
++    # the second build leaves out the intrinsics, for the portable loops
++    foreach name, args: { 'elanpress-sums': [], 'elanpress-sums-portable': ['-DELANPRESS_NO_INTRINSICS'] }
++        test_exe = executable('test-' + name,
++            sources: 'test-elanpress-sums.c',
++            include_directories: [ root_inc, include_directories('../libfprint/drivers') ],
++            dependencies: [ glib_dep, mathlib_dep ],
++            c_args: common_cflags + args,
++            install: installed_tests,
++            install_dir: installed_tests_execdir,
++        )
++        test(name,
++            test_exe,
++            suite: ['unit-tests'],
++            env: envs,
++        )
++
++        configure_file(
++            input: 'test.in',
++            output: name + '.test',
++            install: installed_tests,
++            install_dir: installed_tests_testdir,
++            configuration: {
++                'exec': installed_tests_execdir / 'test-' + name,
++                'env': envs_str,
++                'extra_content': '',
++            },
++        )
++    endforeach
++endif
++
+ # Run udev rule generator with fatal warnings
+ envs.set('UDEV_HWDB', udev_hwdb.full_path())
+ envs.set('UDEV_HWDB_CHECK_CONTENTS', default_drivers_are_enabled ? '1' : '0')
+diff --git a/tests/test-elanpress-match.c b/tests/test-elanpress-match.c
+new file mode 100644
+index 0000000..0a78047
+--- /dev/null
++++ b/tests/test-elanpress-match.c
+@@ -0,0 +1,747 @@
++/*
++ * Unit tests for the elanpress frame selection helpers
++ * Copyright (C) 2026 Hugo Sales <hugo@hsal.es>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#include <glib.h>
++#include <locale.h>
++#include <math.h>
++#include <string.h>
++#include "elanpress-match.h"
++
++static const ElanpressGates gates = {
++  ELANPRESS_MIN_MEAN, ELANPRESS_MIN_CONTRAST, ELANPRESS_MIN_COVERAGE
++};
++
++/* A touch recorded on 04f3:0c6e: one frame taken while the finger landed,
++ * then eight full-contact frames with half its contrast */
++static void
++test_landing_frame_sets_no_bar (void)
++{
++  ElanpressQuality q[9];
++  gboolean pass[9];
++
++  q[0] = (ElanpressQuality){ 2000, 1514, 0.34 };
++  for (int i = 1; i < 9; i++)
++    q[i] = (ElanpressQuality){ 2000, 670, 1.00 };
++
++  g_assert_cmpfloat_with_epsilon (elanpress_contrast_bar (q, 9, &gates),
++                                  335, 1e-9);
++  elanpress_frames_pass (q, 9, &gates, pass);
++  g_assert_false (pass[0]);
++  for (int i = 1; i < 9; i++)
++    g_assert_true (pass[i]);
++}
++
++static void
++test_frames_under_the_bar_fail (void)
++{
++  ElanpressQuality q[] = {
++    { 2000, 600, 0.90 },
++    { 2000, 299, 0.90 },   /* under half of 600 */
++    { 2000, 300, 0.90 },
++  };
++  gboolean pass[3];
++
++  elanpress_frames_pass (q, 3, &gates, pass);
++  g_assert_true (pass[0]);
++  g_assert_false (pass[1]);
++  g_assert_true (pass[2]);
++}
++
++static void
++test_bar_is_half_the_best_passing_frame (void)
++{
++  ElanpressQuality q[] = {
++    { 2000, 200, 0.80 },
++    { 2000, 600, 0.90 },
++    { 100, 900, 0.90 },   /* fails the mean gate */
++  };
++
++  g_assert_cmpfloat_with_epsilon (elanpress_contrast_bar (q, 3, &gates),
++                                  300, 1e-9);
++}
++
++static void
++test_no_frame_passes (void)
++{
++  ElanpressQuality q[] = {
++    { 2000, 1500, 0.20 },
++    { 100, 800, 1.00 },
++  };
++  gboolean pass[2];
++
++  g_assert_cmpfloat (elanpress_contrast_bar (q, 2, &gates), ==, 0);
++  g_assert_cmpfloat (elanpress_contrast_bar (NULL, 0, &gates), ==, 0);
++  elanpress_frames_pass (q, 2, &gates, pass);
++  g_assert_false (pass[0]);
++  g_assert_false (pass[1]);
++}
++
++static void
++test_nan_gate_rejects_nothing (void)
++{
++  const ElanpressGates nan_gates = { NAN, NAN, NAN };
++  ElanpressQuality q = { 0, 0, 0 };
++
++  g_assert_true (elanpress_quality_passes (&q, &nan_gates));
++}
++
++static void
++test_env_double (void)
++{
++  const char *rejected[] = {
++    "abc", "nan", "NAN", "inf", "-inf", "1e999", "-1e999", "0.5x", "  ",
++    "0.5 x",
++  };
++  const char *accepted[] = { "0.85", " 0.85", "0.85 ", "0.85\n", "\t0.85\t" };
++
++  /* unset and empty log nothing: anything before the sentinel fails */
++  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, "sentinel");
++  g_unsetenv ("FP_ELANPRESS_TEST");
++  g_assert_cmpfloat (elanpress_env_double ("FP_ELANPRESS_TEST", 7), ==, 7);
++  g_setenv ("FP_ELANPRESS_TEST", "", TRUE);
++  g_assert_cmpfloat (elanpress_env_double ("FP_ELANPRESS_TEST", 7), ==, 7);
++  g_message ("sentinel");
++  g_test_assert_expected_messages ();
++  for (guint i = 0; i < G_N_ELEMENTS (rejected); i++)
++    {
++      g_autofree char *message = g_strdup_printf (
++        "Ignoring FP_ELANPRESS_TEST=\"%s\", expected a number, using 7", rejected[i]);
++
++      g_setenv ("FP_ELANPRESS_TEST", rejected[i], TRUE);
++      g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, message);
++      g_assert_cmpfloat (elanpress_env_double ("FP_ELANPRESS_TEST", 7), ==, 7);
++      g_test_assert_expected_messages ();
++    }
++
++  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, "sentinel");
++  for (guint i = 0; i < G_N_ELEMENTS (accepted); i++)
++    {
++      g_setenv ("FP_ELANPRESS_TEST", accepted[i], TRUE);
++      g_assert_cmpfloat (elanpress_env_double ("FP_ELANPRESS_TEST", 7), ==, 0.85);
++    }
++  g_message ("sentinel");
++  g_test_assert_expected_messages ();
++  g_unsetenv ("FP_ELANPRESS_TEST");
++}
++
++/* the matcher settings themselves keep their defaults for values that are
++ * not finite, which the old parser passed on to casts and comparisons */
++static void
++test_env_params_not_finite (void)
++{
++  const char *names[] = {
++    "FP_ELANPRESS_THRESHOLD", "FP_ELANPRESS_ROT_RANGE", "FP_ELANPRESS_ROT_STEP",
++    "FP_ELANPRESS_MIN_OVERLAP", "FP_ELANPRESS_NORM_WIN", "FP_ELANPRESS_CANDIDATES",
++    "FP_ELANPRESS_SCORE_MODE", "FP_ELANPRESS_SIDELOBE_R", "FP_ELANPRESS_BLOCK_WEIGHT",
++    "FP_ELANPRESS_ROT_PREFILTER", "FP_ELANPRESS_REG_THRESH", "FP_ELANPRESS_MAX_SIDE",
++  };
++  const char *values[] = { "nan", "inf", "-inf", "1e999" };
++
++  for (guint v = 0; v < G_N_ELEMENTS (values); v++)
++    {
++      ElanpressMatchParams def, p;
++
++      /* zeroed first so the padding compares equal too */
++      memset (&def, 0, sizeof def);
++      memset (&p, 0, sizeof p);
++      elanpress_match_params_default (&def);
++      for (guint i = 0; i < G_N_ELEMENTS (names); i++)
++        g_setenv (names[i], values[v], TRUE);
++      elanpress_match_params_from_env (&p);
++      for (guint i = 0; i < G_N_ELEMENTS (names); i++)
++        g_unsetenv (names[i]);
++      g_assert_cmpmem (&p, sizeof p, &def, sizeof def);
++    }
++}
++
++typedef void (*EnvReader) (void);
++
++static void
++read_params (void)
++{
++  ElanpressMatchParams p;
++
++  elanpress_match_params_from_env (&p);
++}
++
++static void
++read_config (void)
++{
++  ElanpressDeviceConfig cfg = { 0.76, 20, 3, 0.85 };
++
++  elanpress_device_config_from_env (&cfg);
++}
++
++static void
++read_gates (void)
++{
++  ElanpressGates g;
++
++  elanpress_gates_from_env (&g);
++}
++
++/* Runs read with name=value and checks that it logs message and nothing
++ * else. A message that doesn't match the head of the expected list aborts
++ * the test, so a stray one before or after fails on the sentinel. */
++static void
++expect_logged (EnvReader read, const char *name, const char *value,
++               const char *message)
++{
++  if (name)
++    g_setenv (name, value, TRUE);
++  if (message)
++    g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, message);
++  g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, "sentinel");
++  read ();
++  g_message ("sentinel");
++  g_test_assert_expected_messages ();
++  if (name)
++    g_unsetenv (name);
++}
++
++/* the messages print numbers the way the parser reads them, with a '.',
++ * also where the locale writes a ','. Both readers' messages that name a
++ * default are checked; env_clamp () only prints whole-number bounds */
++static void
++test_env_logged_locale (void)
++{
++  const char *locales[] = { "de_DE.UTF-8", "fr_FR.UTF-8", "pt_PT.UTF-8" };
++  g_autofree char *old = g_strdup (setlocale (LC_NUMERIC, NULL));
++  const char *set = NULL;
++  char buf[G_ASCII_DTOSTR_BUF_SIZE];
++  ElanpressMatchParams def;
++  char *message;
++
++  for (guint i = 0; i < G_N_ELEMENTS (locales) && !set; i++)
++    set = setlocale (LC_NUMERIC, locales[i]);
++  if (!set)
++    {
++      g_test_skip ("no locale with a decimal comma installed");
++      return;
++    }
++  g_snprintf (buf, sizeof buf, "%g", 0.5);
++  g_assert_cmpstr (buf, ==, "0,5");
++
++  elanpress_match_params_default (&def);
++  message = g_strdup_printf ("Ignoring FP_ELANPRESS_MIN_OVERLAP=\"3\", expected a number in (0, 1], using %s",
++                             g_ascii_formatd (buf, sizeof buf, "%g", def.min_overlap));
++  expect_logged (read_params, "FP_ELANPRESS_MIN_OVERLAP", "3", message);
++  g_free (message);
++  message = g_strdup_printf ("Ignoring FP_ELANPRESS_REG_THRESH=\"0,7\", expected a number, using %s",
++                             g_ascii_formatd (buf, sizeof buf, "%g", def.reg_thresh));
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "0,7", message);
++  g_free (message);
++  setlocale (LC_NUMERIC, old);
++}
++
++/* every value that is ignored or changed says so */
++static void
++test_env_logged (void)
++{
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "0.7x",
++                 "Ignoring FP_ELANPRESS_REG_THRESH=\"0.7x\", expected a number, using 0.75");
++  /* the value is escaped, so it can't break the log line */
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "0.7\nx",
++                 "Ignoring FP_ELANPRESS_REG_THRESH=\"0.7\\nx\", expected a number, using 0.75");
++  expect_logged (read_params, "FP_ELANPRESS_ROT_STEP", "-1\n",
++                 "Ignoring FP_ELANPRESS_ROT_STEP=\"-1\\n\", expected a number above 0, using 4");
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "nan",
++                 "Ignoring FP_ELANPRESS_REG_THRESH=\"nan\", expected a number, using 0.75");
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "0",
++                 "Ignoring FP_ELANPRESS_REG_THRESH=\"0\", expected a number in (0, 1], using 0.75");
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "1.5",
++                 "Ignoring FP_ELANPRESS_REG_THRESH=\"1.5\", expected a number in (0, 1], using 0.75");
++  /* the threshold is the device's, read with the device config */
++  expect_logged (read_params, "FP_ELANPRESS_THRESHOLD", "x", NULL);
++  expect_logged (read_params, "FP_ELANPRESS_NORM_WIN", "2",
++                 "Ignoring FP_ELANPRESS_NORM_WIN=\"2\", expected at least 3, using 11");
++  expect_logged (read_params, "FP_ELANPRESS_NORM_WIN", "8",
++                 "FP_ELANPRESS_NORM_WIN=\"8\" is not odd, using 9");
++  expect_logged (read_params, "FP_ELANPRESS_NORM_WIN", "8.5",
++                 "FP_ELANPRESS_NORM_WIN=\"8.5\" is not a whole number, using 9");
++  expect_logged (read_params, "FP_ELANPRESS_NORM_WIN", "x",
++                 "Ignoring FP_ELANPRESS_NORM_WIN=\"x\", expected a number, using 11");
++  expect_logged (read_params, "FP_ELANPRESS_ROT_STEP", "x",
++                 "Ignoring FP_ELANPRESS_ROT_STEP=\"x\", expected a number, using 4");
++  expect_logged (read_params, "FP_ELANPRESS_SIDELOBE_R", "0",
++                 "Ignoring FP_ELANPRESS_SIDELOBE_R=\"0\", expected at least 1, using 4");
++  expect_logged (read_params, "FP_ELANPRESS_ROT_PREFILTER", "-1",
++                 "Ignoring FP_ELANPRESS_ROT_PREFILTER=\"-1\", expected at least 0, using 3");
++  expect_logged (read_params, "FP_ELANPRESS_MAX_SIDE", "10",
++                 "Ignoring FP_ELANPRESS_MAX_SIDE=\"10\", expected at least 64, using 256");
++  expect_logged (read_params, "FP_ELANPRESS_NORM_WIN", "1e12",
++                 "FP_ELANPRESS_NORM_WIN=\"1e12\" is out of range, using 2147483647");
++  expect_logged (read_params, "FP_ELANPRESS_COARSE_PEAKS", "-1",
++                 "Ignoring FP_ELANPRESS_COARSE_PEAKS=\"-1\", expected at least 0, using 4");
++  expect_logged (read_params, "FP_ELANPRESS_NORM_WIN", "9.5",
++                 "FP_ELANPRESS_NORM_WIN=\"9.5\" is not a whole number, using 9");
++  expect_logged (read_params, "FP_ELANPRESS_CANDIDATES", "2.9",
++                 "FP_ELANPRESS_CANDIDATES=\"2.9\" is not a whole number, using 2");
++  expect_logged (read_params, "FP_ELANPRESS_SCORE_MODE", "1.7",
++                 "FP_ELANPRESS_SCORE_MODE=\"1.7\" is not a whole number, using 1");
++  expect_logged (read_params, "FP_ELANPRESS_CANDIDATES", "100",
++                 "FP_ELANPRESS_CANDIDATES=\"100\" is out of range, using 64");
++  expect_logged (read_params, "FP_ELANPRESS_COARSE_PEAKS", "100",
++                 "FP_ELANPRESS_COARSE_PEAKS=\"100\" is out of range, using 64");
++  expect_logged (read_params, "FP_ELANPRESS_ROT_STEP", "0",
++                 "Ignoring FP_ELANPRESS_ROT_STEP=\"0\", expected a number above 0, using 4");
++  expect_logged (read_params, "FP_ELANPRESS_ROT_STEP", "0.1",
++                 "FP_ELANPRESS_ROT_STEP=\"0.1\" is out of range, using 1");
++  expect_logged (read_params, "FP_ELANPRESS_ROT_RANGE", "-1",
++                 "FP_ELANPRESS_ROT_RANGE=\"-1\" is out of range, using 0");
++  expect_logged (read_params, "FP_ELANPRESS_MIN_OVERLAP", "3",
++                 "Ignoring FP_ELANPRESS_MIN_OVERLAP=\"3\", expected a number in (0, 1], using 0.4");
++  expect_logged (read_params, "FP_ELANPRESS_MIN_OVERLAP", "0",
++                 "Ignoring FP_ELANPRESS_MIN_OVERLAP=\"0\", expected a number in (0, 1], using 0.4");
++  expect_logged (read_params, "FP_ELANPRESS_SCORE_MODE", "5",
++                 "FP_ELANPRESS_SCORE_MODE=\"5\" is out of range, using 2");
++  expect_logged (read_params, "FP_ELANPRESS_BLOCK_WEIGHT", "-0.5",
++                 "FP_ELANPRESS_BLOCK_WEIGHT=\"-0.5\" is out of range, using 0");
++
++  expect_logged (read_config, "FP_ELANPRESS_THRESHOLD", "x",
++                 "Ignoring FP_ELANPRESS_THRESHOLD=\"x\", expected a number, using 0.76");
++  expect_logged (read_config, "FP_ELANPRESS_THRESHOLD", "-1",
++                 "Ignoring FP_ELANPRESS_THRESHOLD=\"-1\", expected a number above 0, using 0.76");
++  expect_logged (read_config, "FP_ELANPRESS_THRESHOLD", "0",
++                 "Ignoring FP_ELANPRESS_THRESHOLD=\"0\", expected a number above 0, using 0.76");
++  expect_logged (read_config, "FP_ELANPRESS_ENROLL_STAGES", "100",
++                 "FP_ELANPRESS_ENROLL_STAGES=\"100\" is out of range, using 40");
++  expect_logged (read_config, "FP_ELANPRESS_ENROLL_STAGES", "12.9",
++                 "FP_ELANPRESS_ENROLL_STAGES=\"12.9\" is not a whole number, using 12");
++  expect_logged (read_config, "FP_ELANPRESS_ENROLL_STAGES", "x",
++                 "Ignoring FP_ELANPRESS_ENROLL_STAGES=\"x\", expected a number, using 20");
++  expect_logged (read_config, "FP_ELANPRESS_IMAGES_PER_TOUCH", "20",
++                 "FP_ELANPRESS_IMAGES_PER_TOUCH=\"20\" is out of range, using 14");
++  expect_logged (read_config, "FP_ELANPRESS_IMAGES_PER_TOUCH", "0",
++                 "FP_ELANPRESS_IMAGES_PER_TOUCH=\"0\" is out of range, using 1");
++  expect_logged (read_config, "FP_ELANPRESS_DUP_SIMILARITY", "1.5",
++                 "FP_ELANPRESS_DUP_SIMILARITY=\"1.5\" is out of range, using 1");
++
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_MEAN", "inf",
++                 "Ignoring FP_ELANPRESS_MIN_MEAN=\"inf\", expected a number, using 150");
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_MEAN", "-1",
++                 "Ignoring FP_ELANPRESS_MIN_MEAN=\"-1\", expected a number of at least 0, using 150");
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_CONTRAST", "-0.5",
++                 "Ignoring FP_ELANPRESS_MIN_CONTRAST=\"-0.5\", expected a number of at least 0, using 40");
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_COVERAGE", "1.5",
++                 "Ignoring FP_ELANPRESS_MIN_COVERAGE=\"1.5\", expected a number in [0, 1], using 0.35");
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_COVERAGE", "-0.1",
++                 "Ignoring FP_ELANPRESS_MIN_COVERAGE=\"-0.1\", expected a number in [0, 1], using 0.35");
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_CONTRAST", "4o",
++                 "Ignoring FP_ELANPRESS_MIN_CONTRAST=\"4o\", expected a number, using 40");
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_COVERAGE", "",
++                 NULL);
++
++  /* values in range and unset or empty variables log nothing */
++  expect_logged (read_params, "FP_ELANPRESS_REG_THRESH", "1", NULL);
++  expect_logged (read_config, "FP_ELANPRESS_THRESHOLD", "1", NULL);
++  expect_logged (read_config, "FP_ELANPRESS_THRESHOLD", "2.5", NULL);
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_MEAN", "0", NULL);
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_CONTRAST", "0", NULL);
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_COVERAGE", "0", NULL);
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_COVERAGE", "1", NULL);
++  g_setenv ("FP_ELANPRESS_CANDIDATES", "", TRUE);
++  expect_logged (read_params, "FP_ELANPRESS_MIN_OVERLAP", "0.3", NULL);
++  expect_logged (read_config, "FP_ELANPRESS_ENROLL_STAGES", "40", NULL);
++  expect_logged (read_gates, "FP_ELANPRESS_MIN_COVERAGE", "0.5", NULL);
++  g_unsetenv ("FP_ELANPRESS_CANDIDATES");
++}
++
++/* the readers take each setting from its variable */
++static void
++test_env_config_and_gates (void)
++{
++  ElanpressDeviceConfig cfg = { 0.76, 20, 3, 0.85 };
++  ElanpressMatchParams p;
++  ElanpressGates g;
++
++  /* the threshold is the device's; the matcher's reader keeps the global
++   * default for elanpress_load_config () to replace */
++  g_setenv ("FP_ELANPRESS_THRESHOLD", "0.9", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.threshold, ==, 0.76);
++
++  g_setenv ("FP_ELANPRESS_THRESHOLD", "0.8", TRUE);
++  g_setenv ("FP_ELANPRESS_ENROLL_STAGES", "12", TRUE);
++  g_setenv ("FP_ELANPRESS_IMAGES_PER_TOUCH", "5", TRUE);
++  g_setenv ("FP_ELANPRESS_DUP_SIMILARITY", "0.9", TRUE);
++  elanpress_device_config_from_env (&cfg);
++  g_assert_cmpfloat (cfg.threshold, ==, 0.8);
++  g_assert_cmpint (cfg.enroll_stages, ==, 12);
++  g_assert_cmpint (cfg.images_per_touch, ==, 5);
++  g_assert_cmpfloat (cfg.dup_similarity, ==, 0.9);
++
++  /* the values used, as the messages in test_env_logged () name them */
++  g_setenv ("FP_ELANPRESS_ENROLL_STAGES", "100", TRUE);
++  g_setenv ("FP_ELANPRESS_IMAGES_PER_TOUCH", "0", TRUE);
++  g_setenv ("FP_ELANPRESS_DUP_SIMILARITY", "1.5", TRUE);
++  elanpress_device_config_from_env (&cfg);
++  g_assert_cmpint (cfg.enroll_stages, ==, ELANPRESS_MAX_ENROLL_STAGES);
++  g_assert_cmpint (cfg.images_per_touch, ==, 1);
++  g_assert_cmpfloat (cfg.dup_similarity, ==, 1);
++  g_setenv ("FP_ELANPRESS_ENROLL_STAGES", "12.9", TRUE);
++  elanpress_device_config_from_env (&cfg);
++  g_assert_cmpint (cfg.enroll_stages, ==, 12);
++
++  g_unsetenv ("FP_ELANPRESS_THRESHOLD");
++  g_unsetenv ("FP_ELANPRESS_ENROLL_STAGES");
++  g_unsetenv ("FP_ELANPRESS_IMAGES_PER_TOUCH");
++  g_unsetenv ("FP_ELANPRESS_DUP_SIMILARITY");
++
++  elanpress_gates_from_env (&g);
++  g_assert_cmpfloat (g.min_mean, ==, ELANPRESS_MIN_MEAN);
++  g_assert_cmpfloat (g.min_contrast, ==, ELANPRESS_MIN_CONTRAST);
++  g_assert_cmpfloat (g.min_coverage, ==, ELANPRESS_MIN_COVERAGE);
++  g_setenv ("FP_ELANPRESS_MIN_MEAN", "200", TRUE);
++  g_setenv ("FP_ELANPRESS_MIN_CONTRAST", "60", TRUE);
++  g_setenv ("FP_ELANPRESS_MIN_COVERAGE", "0.5", TRUE);
++  elanpress_gates_from_env (&g);
++  g_assert_cmpfloat (g.min_mean, ==, 200);
++  g_assert_cmpfloat (g.min_contrast, ==, 60);
++  g_assert_cmpfloat (g.min_coverage, ==, 0.5);
++  g_unsetenv ("FP_ELANPRESS_MIN_MEAN");
++  g_unsetenv ("FP_ELANPRESS_MIN_CONTRAST");
++  g_unsetenv ("FP_ELANPRESS_MIN_COVERAGE");
++}
++
++/* an out-of-range value leaves the default, the ends kept are used */
++static void
++test_env_out_of_range_kept (void)
++{
++  ElanpressDeviceConfig cfg;
++  ElanpressMatchParams p, def;
++  ElanpressGates g;
++
++  const struct
++  {
++    const char *name, *value;
++    gboolean    ignored;
++    double      want;
++  } cases[] = {
++    { "FP_ELANPRESS_MIN_MEAN", "-1", TRUE, ELANPRESS_MIN_MEAN },
++    { "FP_ELANPRESS_MIN_MEAN", "0", FALSE, 0 },
++    { "FP_ELANPRESS_MIN_CONTRAST", "-0.5", TRUE, ELANPRESS_MIN_CONTRAST },
++    { "FP_ELANPRESS_MIN_CONTRAST", "0", FALSE, 0 },
++    { "FP_ELANPRESS_MIN_COVERAGE", "1.5", TRUE, ELANPRESS_MIN_COVERAGE },
++    { "FP_ELANPRESS_MIN_COVERAGE", "-0.1", TRUE, ELANPRESS_MIN_COVERAGE },
++    { "FP_ELANPRESS_MIN_COVERAGE", "0", FALSE, 0 },
++    { "FP_ELANPRESS_MIN_COVERAGE", "1", FALSE, 1 },
++  };
++
++  elanpress_match_params_default (&def);
++  for (guint i = 0; i < 4; i++)
++    {
++      const char *values[] = { "-1", "0", "1", "2.5" };
++      const double want[] = { 0.76, 0.76, 1, 2.5 };
++
++      cfg = (ElanpressDeviceConfig){ 0.76, 20, 3, 0.85 };
++      g_setenv ("FP_ELANPRESS_THRESHOLD", values[i], TRUE);
++      g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, i < 2 ? "*THRESHOLD*" : "sentinel");
++      if (i < 2)
++        g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, "sentinel");
++      elanpress_device_config_from_env (&cfg);
++      g_message ("sentinel");
++      g_test_assert_expected_messages ();
++      g_assert_cmpfloat (cfg.threshold, ==, want[i]);
++    }
++  g_unsetenv ("FP_ELANPRESS_THRESHOLD");
++
++  for (guint i = 0; i < 4; i++)
++    {
++      const char *values[] = { "0", "1.5", "1", "1e-6" };
++      const double want[] = { def.reg_thresh, def.reg_thresh, 1, 1e-6 };
++
++      g_setenv ("FP_ELANPRESS_REG_THRESH", values[i], TRUE);
++      g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, i < 2 ? "*REG_THRESH*" : "sentinel");
++      if (i < 2)
++        g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, "sentinel");
++      elanpress_match_params_from_env (&p);
++      g_message ("sentinel");
++      g_test_assert_expected_messages ();
++      g_assert_cmpfloat (p.reg_thresh, ==, want[i]);
++    }
++  g_unsetenv ("FP_ELANPRESS_REG_THRESH");
++
++  for (guint i = 0; i < G_N_ELEMENTS (cases); i++)
++    {
++      gboolean ignored = cases[i].ignored;
++
++      g_setenv (cases[i].name, cases[i].value, TRUE);
++      g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, ignored ? "Ignoring *" : "sentinel");
++      if (ignored)
++        g_test_expect_message (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE, "sentinel");
++      elanpress_gates_from_env (&g);
++      g_message ("sentinel");
++      g_test_assert_expected_messages ();
++      g_unsetenv (cases[i].name);
++      g_assert_cmpfloat (g.min_mean, ==, g_str_equal (cases[i].name, "FP_ELANPRESS_MIN_MEAN") ? cases[i].want : ELANPRESS_MIN_MEAN);
++      g_assert_cmpfloat (g.min_contrast, ==, g_str_equal (cases[i].name, "FP_ELANPRESS_MIN_CONTRAST") ? cases[i].want : ELANPRESS_MIN_CONTRAST);
++      g_assert_cmpfloat (g.min_coverage, ==, g_str_equal (cases[i].name, "FP_ELANPRESS_MIN_COVERAGE") ? cases[i].want : ELANPRESS_MIN_COVERAGE);
++    }
++}
++
++static const char *int_settings[] = {
++  "FP_ELANPRESS_NORM_WIN", "FP_ELANPRESS_CANDIDATES",
++  "FP_ELANPRESS_SCORE_MODE", "FP_ELANPRESS_SIDELOBE_R",
++  "FP_ELANPRESS_ROT_PREFILTER", "FP_ELANPRESS_MAX_SIDE",
++};
++
++static void
++set_int_settings (const char *values[])
++{
++  for (guint i = 0; i < G_N_ELEMENTS (int_settings); i++)
++    g_setenv (int_settings[i], values[i], TRUE);
++}
++
++static void
++test_env_int_settings_fit (void)
++{
++  const char *huge[] = { "1e30", "1e30", "1e30", "1e30", "1e30", "1e30" };
++  const char *at_min[] = { "3", "1", "0", "1", "0", "64" };
++  const char *under_min[] = { "2", "0", "-1", "0", "-1", "63" };
++  ElanpressMatchParams def, p;
++
++  elanpress_match_params_default (&def);
++
++  set_int_settings (huge);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.norm_win, ==, G_MAXINT);
++  g_assert_cmpint (p.candidates, ==, ELANPRESS_MAX_CANDIDATES);
++  g_assert_cmpint (p.score_mode, ==, 2);
++  g_assert_cmpint (p.sidelobe_r, ==, G_MAXINT);
++  g_assert_cmpint (p.rot_prefilter, ==, G_MAXINT);
++  g_assert_cmpint (p.max_side, ==, G_MAXINT);
++
++  set_int_settings (at_min);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.norm_win, ==, 3);
++  g_assert_cmpint (p.candidates, ==, 1);
++  g_assert_cmpint (p.score_mode, ==, 0);
++  g_assert_cmpint (p.sidelobe_r, ==, 1);
++  g_assert_cmpint (p.rot_prefilter, ==, 0);
++  g_assert_cmpint (p.max_side, ==, 64);
++
++  /* SCORE_MODE has no minimum; it clamps to 0 */
++  set_int_settings (under_min);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.norm_win, ==, def.norm_win);
++  g_assert_cmpint (p.candidates, ==, def.candidates);
++  g_assert_cmpint (p.score_mode, ==, 0);
++  g_assert_cmpint (p.sidelobe_r, ==, def.sidelobe_r);
++  g_assert_cmpint (p.rot_prefilter, ==, def.rot_prefilter);
++  g_assert_cmpint (p.max_side, ==, def.max_side);
++
++  g_setenv ("FP_ELANPRESS_NORM_WIN", "8", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.norm_win, ==, 9);
++
++  /* SCORE_MODE has no minimum, so a huge negative value reaches the cast.
++   * Its default is 0, so the checks for 0 can't tell a clamp from an
++   * ignored value; they only catch the cast under a float-cast-overflow
++   * sanitizer, which -fsanitize=undefined leaves out in GCC */
++  g_setenv ("FP_ELANPRESS_SCORE_MODE", "1", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.score_mode, ==, 1);
++  g_setenv ("FP_ELANPRESS_SCORE_MODE", "-1e30", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.score_mode, ==, 0);
++
++  /* the candidate cap on its own, with values that fit an int */
++  g_setenv ("FP_ELANPRESS_CANDIDATES", "2e9", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.candidates, ==, ELANPRESS_MAX_CANDIDATES);
++  g_setenv ("FP_ELANPRESS_CANDIDATES", "64", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpint (p.candidates, ==, 64);
++
++  for (guint i = 0; i < G_N_ELEMENTS (int_settings); i++)
++    g_unsetenv (int_settings[i]);
++}
++
++static void
++test_env_rotation_bounded (void)
++{
++  ElanpressMatchParams def, p;
++
++  elanpress_match_params_default (&def);
++
++  g_setenv ("FP_ELANPRESS_ROT_RANGE", "-1", TRUE);
++  g_setenv ("FP_ELANPRESS_ROT_STEP", "1e-30", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.rot_range, ==, 0);
++  g_assert_cmpfloat (p.rot_step, ==, ELANPRESS_MIN_ROT_STEP);
++
++  g_setenv ("FP_ELANPRESS_ROT_RANGE", "1e30", TRUE);
++  g_setenv ("FP_ELANPRESS_ROT_STEP", "0", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.rot_range, ==, ELANPRESS_MAX_ROT_RANGE);
++  g_assert_cmpfloat (p.rot_step, ==, def.rot_step);
++
++  /* a negative step is ignored too, not raised to the minimum */
++  g_setenv ("FP_ELANPRESS_ROT_STEP", "-5", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.rot_step, ==, def.rot_step);
++
++  g_setenv ("FP_ELANPRESS_ROT_RANGE", "20", TRUE);
++  g_setenv ("FP_ELANPRESS_ROT_STEP", "2.5", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.rot_range, ==, 20);
++  g_assert_cmpfloat (p.rot_step, ==, 2.5);
++
++  g_unsetenv ("FP_ELANPRESS_ROT_RANGE");
++  g_unsetenv ("FP_ELANPRESS_ROT_STEP");
++}
++
++/* the bounds above are what limit the probe's rotated copies, when the
++ * settings come from the environment */
++static void
++test_probe_rotation_count (void)
++{
++  g_autofree guint8 *img = g_malloc0 (64 * 88);
++  ElanpressMatchParams p;
++  ElanpressProbe *pr;
++
++  elanpress_match_params_default (&p);
++  pr = elanpress_probe_new (img, 64, 88, &p);
++  g_assert_cmpint (elanpress_probe_n_rotations (pr), ==, 15);
++  elanpress_probe_free (pr);
++
++  g_setenv ("FP_ELANPRESS_ROT_RANGE", "1e9", TRUE);
++  g_setenv ("FP_ELANPRESS_ROT_STEP", "1e-9", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_unsetenv ("FP_ELANPRESS_ROT_RANGE");
++  g_unsetenv ("FP_ELANPRESS_ROT_STEP");
++  pr = elanpress_probe_new (img, 64, 88, &p);
++  g_assert_cmpint (elanpress_probe_n_rotations (pr), ==, 181);
++  elanpress_probe_free (pr);
++
++  p.rot_range = ELANPRESS_MAX_ROT_RANGE;
++  p.rot_step = ELANPRESS_MIN_ROT_STEP;
++  pr = elanpress_probe_new (img, 64, 88, &p);
++  g_assert_cmpint (elanpress_probe_n_rotations (pr), ==, 181);
++  elanpress_probe_free (pr);
++
++  p.rot_range = 0;
++  pr = elanpress_probe_new (img, 64, 88, &p);
++  g_assert_cmpint (elanpress_probe_n_rotations (pr), ==, 1);
++  elanpress_probe_free (pr);
++}
++
++/* the probe of a random image matched against the image itself */
++static ElanpressMatchResult
++match_self (double min_overlap)
++{
++  g_autoptr(GRand) r = g_rand_new_with_seed (1);
++  g_autofree guint8 *img = g_malloc (64 * 88);
++  ElanpressMatchParams p;
++  ElanpressMatchResult res;
++  ElanpressProbe *pr;
++
++  for (int i = 0; i < 64 * 88; i++)
++    img[i] = g_rand_int_range (r, 0, 256);
++  elanpress_match_params_default (&p);
++  p.min_overlap = min_overlap;
++  pr = elanpress_probe_new (img, 64, 88, &p);
++  elanpress_probe_match (pr, img, &res);
++  elanpress_probe_free (pr);
++  return res;
++}
++
++static void
++test_env_min_overlap_fraction (void)
++{
++  const char *ignored[] = { "1e30", "1.5", "1.0001", "0", "-1e30" };
++  ElanpressMatchParams def, p;
++  ElanpressMatchResult res;
++
++  elanpress_match_params_default (&def);
++  for (guint i = 0; i < G_N_ELEMENTS (ignored); i++)
++    {
++      g_setenv ("FP_ELANPRESS_MIN_OVERLAP", ignored[i], TRUE);
++      elanpress_match_params_from_env (&p);
++      g_assert_cmpfloat (p.min_overlap, ==, def.min_overlap);
++    }
++
++  g_setenv ("FP_ELANPRESS_MIN_OVERLAP", "1", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.min_overlap, ==, 1.0);
++
++  g_setenv ("FP_ELANPRESS_MIN_OVERLAP", "0.3", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.min_overlap, ==, 0.3);
++
++  g_setenv ("FP_ELANPRESS_MIN_OVERLAP", "1e-6", TRUE);
++  elanpress_match_params_from_env (&p);
++  g_assert_cmpfloat (p.min_overlap, ==, 1e-6);
++
++  /* the value that overflowed the cast reaches the matcher as the default */
++  g_setenv ("FP_ELANPRESS_MIN_OVERLAP", "1e30", TRUE);
++  elanpress_match_params_from_env (&p);
++  res = match_self (p.min_overlap);
++  g_assert_cmpint (res.overlap, ==, 64 * 88);
++
++  g_unsetenv ("FP_ELANPRESS_MIN_OVERLAP");
++
++  /* at the top of the range only the full overlap counts, and it is found */
++  res = match_self (1.0);
++  g_assert_cmpint (res.overlap, ==, 64 * 88);
++  g_assert_cmpfloat (res.score, >, 0.99);
++}
++
++int
++main (int argc, char *argv[])
++{
++  g_auto(GStrv) names = g_listenv ();
++
++  g_test_init (&argc, &argv, NULL);
++
++  /* each test sets the FP_ELANPRESS_* variables it needs, and one exported
++   * by whoever runs the tests would change what the others read */
++  for (guint i = 0; names[i]; i++)
++    if (g_str_has_prefix (names[i], "FP_ELANPRESS_"))
++      g_unsetenv (names[i]);
++
++  g_test_add_func ("/elanpress/contrast-bar/landing-frame",
++                   test_landing_frame_sets_no_bar);
++  g_test_add_func ("/elanpress/contrast-bar/best-passing",
++                   test_bar_is_half_the_best_passing_frame);
++  g_test_add_func ("/elanpress/contrast-bar/under-the-bar",
++                   test_frames_under_the_bar_fail);
++  g_test_add_func ("/elanpress/contrast-bar/none-pass",
++                   test_no_frame_passes);
++  g_test_add_func ("/elanpress/quality/nan-gate",
++                   test_nan_gate_rejects_nothing);
++
++  g_test_add_func ("/elanpress/env/double", test_env_double);
++  g_test_add_func ("/elanpress/env/params-not-finite", test_env_params_not_finite);
++  g_test_add_func ("/elanpress/env/logged", test_env_logged);
++  g_test_add_func ("/elanpress/env/logged-locale", test_env_logged_locale);
++  g_test_add_func ("/elanpress/env/config-and-gates", test_env_config_and_gates);
++  g_test_add_func ("/elanpress/env/out-of-range-kept", test_env_out_of_range_kept);
++  g_test_add_func ("/elanpress/env/int-settings-fit",
++                   test_env_int_settings_fit);
++  g_test_add_func ("/elanpress/env/rotation-bounded",
++                   test_env_rotation_bounded);
++  g_test_add_func ("/elanpress/probe/rotation-count",
++                   test_probe_rotation_count);
++  g_test_add_func ("/elanpress/env/min-overlap-fraction",
++                   test_env_min_overlap_fraction);
++
++  return g_test_run ();
++}
+diff --git a/tests/test-elanpress-sums.c b/tests/test-elanpress-sums.c
+new file mode 100644
+index 0000000..fe865b0
+--- /dev/null
++++ b/tests/test-elanpress-sums.c
+@@ -0,0 +1,1108 @@
++/*
++ * Unit tests for the elanpress NCC sums
++ * Copyright (C) 2026 Hugo Sales <hugo@hsal.es>
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++static int fallbacks;
++#define ELANPRESS_COUNT_FALLBACK() (fallbacks++)
++static int force_peaks;
++#define ELANPRESS_PEAKS_OFF(maps, mask) (!force_peaks && ((maps) || (mask)))
++static int peak_radius = 3;
++#define ELANPRESS_PEAK_RADIUS peak_radius
++
++/* The sums are static, so the matcher is built into this test */
++#include "elanpress-match.c"
++
++/* The six sums of a against b shifted by (dx, dy) over [x0,x1)x[y0,y1),
++ * one pixel at a time, without the padding and squaring v itself */
++static int
++reference_sums (const Layer *a, const Layer *b, int dx, int dy,
++                int x0, int y0, int x1, int y1, gint64 s[5])
++{
++  int n = 0;
++
++  s[0] = s[1] = s[2] = s[3] = s[4] = 0;
++  for (int y = y0; y < y1; y++)
++    for (int x = x0; x < x1; x++)
++      {
++        int i = y * a->stride + x;
++        int j = (y - dy) * b->stride + (x - dx);
++
++        s[0] += a->v[i] * b->m[j];
++        s[1] += b->v[j] * a->m[i];
++        s[2] += a->v[i] * a->v[i] * b->m[j];
++        s[3] += b->v[j] * b->v[j] * a->m[i];
++        s[4] += a->v[i] * b->v[j];
++        n += a->m[i] * b->m[j];
++      }
++  return n;
++}
++
++static guint8 *
++random_image (GRand *r, int w, int h)
++{
++  guint8 *img = g_new0 (guint8, (size_t) w * h);
++
++  for (int i = 0; i < w * h; i++)
++    img[i] = g_rand_int_range (r, 0, 256);
++  return img;
++}
++
++/* smoothed noise: texture at about ridge scale that, unlike a periodic
++ * pattern, lines up with itself at one shift only */
++static guint8 *
++texture_image (GRand *r, int w, int h)
++{
++  g_autofree double *a = g_new (double, (size_t) w * h);
++  g_autofree double *b = g_new (double, (size_t) w * h);
++  guint8 *img = g_new (guint8, (size_t) w * h);
++  double lo = G_MAXDOUBLE, hi = -G_MAXDOUBLE;
++
++  for (int i = 0; i < w * h; i++)
++    a[i] = g_rand_double (r);
++  for (int pass = 0; pass < 2; pass++)
++    {
++      for (int y = 0; y < h; y++)
++        for (int x = 0; x < w; x++)
++          {
++            double sum = 0;
++            int n = 0;
++
++            for (int v = MAX (0, y - 1); v <= MIN (h - 1, y + 1); v++)
++              for (int u = MAX (0, x - 1); u <= MIN (w - 1, x + 1); u++, n++)
++                sum += a[v * w + u];
++            b[y * w + x] = sum / n;
++          }
++      memcpy (a, b, sizeof (double) * w * h);
++    }
++  for (int i = 0; i < w * h; i++)
++    {
++      lo = MIN (lo, a[i]);
++      hi = MAX (hi, a[i]);
++    }
++  for (int i = 0; i < w * h; i++)
++    img[i] = (guint8) lrint (255 * (a[i] - lo) / (hi - lo));
++  return img;
++}
++
++static void
++assert_sums_equal (const gint64 s[5], int n, const gint64 ref[5], int ref_n)
++{
++  g_assert_cmpint (n, ==, ref_n);
++  for (int k = 0; k < 5; k++)
++    g_assert_cmpint (s[k], ==, ref[k]);
++}
++
++/* every offset with any overlap, as layer_ncc() and layer_ncc_rect() call
++ * layer_sums(); covers the table path, the general loop and step 1 */
++static void
++check_all_offsets (GRand *r, const Layer *a, const Layer *b)
++{
++  for (int dy = -(b->h - 1); dy < a->h; dy++)
++    for (int dx = -(b->w - 1); dx < a->w; dx++)
++      {
++        int x0 = MAX (0, dx), x1 = MIN (a->w, b->w + dx);
++        int y0 = MAX (0, dy), y1 = MIN (a->h, b->h + dy);
++        int rx0, rx1, ry0, ry1, n, ref_n;
++        gint64 s[5], ref[5];
++
++        n = layer_sums (a, b, dx, dy, x0, y0, x1, y1, VEC, s);
++        ref_n = reference_sums (a, b, dx, dy, x0, y0, x1, y1, ref);
++        assert_sums_equal (s, n, ref, ref_n);
++
++        rx0 = g_rand_int_range (r, x0, x1);
++        rx1 = g_rand_int_range (r, rx0, x1) + 1;
++        ry0 = g_rand_int_range (r, y0, y1);
++        ry1 = g_rand_int_range (r, ry0, y1) + 1;
++        n = layer_sums (a, b, dx, dy, rx0, ry0, rx1, ry1, 1, s);
++        ref_n = reference_sums (a, b, dx, dy, rx0, ry0, rx1, ry1, ref);
++        assert_sums_equal (s, n, ref, ref_n);
++      }
++}
++
++static void
++test_sums_match_reference (void)
++{
++  GRand *r = g_rand_new_with_seed (1);
++
++  for (int c = 0; c < 12; c++)
++    {
++      int w = g_rand_int_range (r, 8, 40), h = g_rand_int_range (r, 8, 30);
++      int bw = g_rand_int_range (r, 8, 40), bh = g_rand_int_range (r, 8, 30);
++      g_autofree guint8 *pimg = random_image (r, w, h);
++      g_autofree guint8 *timg = random_image (r, bw, bh);
++      g_autofree guint8 *mask = g_new (guint8, (size_t) bw * bh);
++      Layer a, b;
++
++      /* a rotated probe has invalid corners; a template, of its own size
++       * like a canvas, is full, masked without holes, or masked with holes
++       * and then gets no tables */
++      if (c % 2)
++        layer_rotated (&a, pimg, w, h, g_rand_double_range (r, -30, 30));
++      else
++        layer_from_image (&a, pimg, NULL, w, h);
++      layer_build_tables (&a);
++      for (int i = 0; i < bw * bh; i++)
++        mask[i] = (c % 3 == 2 && g_rand_int_range (r, 0, 10) == 0) ? 0 : 255;
++      layer_from_image (&b, timg, c % 3 ? mask : NULL, bw, bh);
++      if (b.full)
++        layer_build_tables (&b);
++      check_all_offsets (r, &a, &b);
++      layer_clear (&a);
++      layer_clear (&b);
++    }
++  g_rand_free (r);
++}
++
++/* The largest square layers that still get tables, all at the pixel value
++ * with the largest square: the last entry of the q table comes within
++ * 0.03% of G_MAXINT32 */
++static void
++test_sums_at_table_limit (void)
++{
++  const int w = 362, h = 362;
++  g_autofree guint8 *img = g_new0 (guint8, w * h);
++  gint64 s[5], ref[5];
++  Layer a, b;
++  int n;
++
++  g_assert_cmpint (w * h, <=, TABLE_MAX_PIXELS);
++  g_assert_cmpint ((w + 1) * (h + 1), >, TABLE_MAX_PIXELS);
++  layer_from_image (&a, img, NULL, w, h);
++  layer_from_image (&b, img, NULL, w, h);
++  layer_build_tables (&a);
++  layer_build_tables (&b);
++  g_assert_nonnull (a.sat);
++  g_assert_nonnull (b.sat);
++  n = layer_sums (&a, &b, 0, 0, 0, 0, w, h, VEC, s);
++  assert_sums_equal (s, n, ref, reference_sums (&a, &b, 0, 0, 0, 0, w, h, ref));
++  layer_clear (&a);
++  layer_clear (&b);
++}
++
++/* past TABLE_MAX_PIXELS a layer gets no tables and the general loop runs */
++static void
++test_sums_without_tables (void)
++{
++  GRand *r = g_rand_new_with_seed (2);
++  const int w = 400, h = 400;
++  g_autofree guint8 *pimg = random_image (r, w, h);
++  g_autofree guint8 *timg = random_image (r, w, h);
++  Layer a, b;
++
++  g_assert_cmpint (w * h, >, TABLE_MAX_PIXELS);
++  layer_from_image (&a, pimg, NULL, w, h);
++  layer_from_image (&b, timg, NULL, w, h);
++  layer_build_tables (&a);
++  layer_build_tables (&b);
++  g_assert_null (a.sat);
++  g_assert_null (b.sat);
++  for (int i = 0; i < 8; i++)
++    {
++      int dx = g_rand_int_range (r, -(w - 1), w), dy = g_rand_int_range (r, -(h - 1), h);
++      int x0 = MAX (0, dx), x1 = MIN (a.w, b.w + dx);
++      int y0 = MAX (0, dy), y1 = MIN (a.h, b.h + dy);
++      gint64 s[5], ref[5];
++      int n = layer_sums (&a, &b, dx, dy, x0, y0, x1, y1, VEC, s);
++
++      assert_sums_equal (s, n, ref, reference_sums (&a, &b, dx, dy, x0, y0, x1, y1, ref));
++    }
++  layer_clear (&a);
++  layer_clear (&b);
++  g_rand_free (r);
++}
++
++/* The sums reference reads layers through the same row stride as the
++ * matcher, so these compare the layers with plain w x h arrays */
++static void
++assert_layer_equal (const Layer *l, const gint16 *v, const guint8 *m, int w, int h)
++{
++  g_assert_cmpint (l->w, ==, w);
++  g_assert_cmpint (l->h, ==, h);
++  for (int y = 0; y < h; y++)
++    for (int x = 0; x < w; x++)
++      {
++        g_assert_cmpint (l->m[y * l->stride + x], ==, m[y * w + x]);
++        g_assert_cmpint (l->v[y * l->stride + x], ==, m[y * w + x] ? v[y * w + x] : 0);
++      }
++}
++
++/* one halving of plain arrays: the mean of each 2x2 block, valid only when
++ * all four pixels are */
++static void
++half_arrays (const gint16 *v, const guint8 *m, int w, int h, gint16 *hv, guint8 *hm)
++{
++  for (int y = 0; y < h / 2; y++)
++    for (int x = 0; x < w / 2; x++)
++      {
++        int i = 2 * y * w + 2 * x;
++
++        hm[y * (w / 2) + x] = m[i] && m[i + 1] && m[i + w] && m[i + w + 1];
++        hv[y * (w / 2) + x] = hm[y * (w / 2) + x] ?
++                              (v[i] + v[i + 1] + v[i + w] + v[i + w + 1]) / 4 : 0;
++      }
++}
++
++/* odd sizes, so a halving drops the last row and column */
++static void
++test_layer_half (void)
++{
++  GRand *r = g_rand_new_with_seed (5);
++  const int w = 75, h = 53;
++  g_autofree guint8 *img = random_image (r, w, h);
++  g_autofree guint8 *mask = g_new (guint8, (size_t) w * h);
++  g_autofree gint16 *v = g_new (gint16, (size_t) w * h);
++  g_autofree gint16 *hv = g_new (gint16, (size_t) w * h);
++  g_autofree gint16 *qv = g_new (gint16, (size_t) w * h);
++  g_autofree guint8 *hm = g_new (guint8, (size_t) w * h);
++  g_autofree guint8 *qm = g_new (guint8, (size_t) w * h);
++  Layer full, half, quarter;
++
++  for (int i = 0; i < w * h; i++)
++    {
++      mask[i] = g_rand_int_range (r, 0, 10) != 0;
++      v[i] = (gint16) img[i] - 128;
++    }
++  layer_from_image (&full, img, mask, w, h);
++  layer_half (&half, &full);
++  layer_half (&quarter, &half);
++  assert_layer_equal (&full, v, mask, w, h);
++  half_arrays (v, mask, w, h, hv, hm);
++  assert_layer_equal (&half, hv, hm, w / 2, h / 2);
++  half_arrays (hv, hm, w / 2, h / 2, qv, qm);
++  assert_layer_equal (&quarter, qv, qm, w / 4, h / 4);
++  layer_clear (&full);
++  layer_clear (&half);
++  layer_clear (&quarter);
++  g_rand_free (r);
++}
++
++/* a paste up and to the left grows the canvas on those sides, keeps the
++ * pixels already there and fills the rest from the new image */
++static void
++test_canvas_paste (void)
++{
++  GRand *r = g_rand_new_with_seed (6);
++  const int w = 41, h = 29, dx = 7, dy = 5;
++  g_autofree guint8 *a = random_image (r, w, h);
++  g_autofree guint8 *b = random_image (r, w, h);
++  ElanpressCanvas *c = elanpress_canvas_new_from_image (a, w, h);
++
++  g_assert_true (canvas_paste (c, b, w, h, dx, dy, 0.0, 1000));
++  g_assert_cmpint (c->w, ==, w + dx);
++  g_assert_cmpint (c->h, ==, h + dy);
++  g_assert_cmpint (c->n_images, ==, 2);
++  for (int y = 0; y < c->h; y++)
++    for (int x = 0; x < c->w; x++)
++      {
++        gboolean in_a = x >= dx && y >= dy;
++        gboolean in_b = x < w && y < h;
++        guint8 px = c->px[y * c->w + x];
++
++        g_assert_cmpint (c->mask[y * c->w + x], ==, in_a || in_b);
++        if (in_a)
++          g_assert_cmpint (px, ==, a[(y - dy) * w + (x - dx)]);
++        else if (in_b)
++          g_assert_cmpint (px, ==, b[y * w + x]);
++      }
++  elanpress_canvas_free (c);
++  g_rand_free (r);
++}
++
++#ifdef ELANPRESS_DISPATCH
++typedef void (*CrossSums) (const Layer   *a,
++                           const Layer   *b,
++                           int            dx,
++                           int            dy,
++                           int            x0,
++                           int            y0,
++                           int            x1,
++                           int            y1,
++                           const gboolean fulla,
++                           gint64         s[5]);
++
++/* numbered as cross_sums_level() numbers them */
++static const struct
++{
++  const char *name;
++  CrossSums   fn;
++  int         level;
++} copies[] = {
++  { "sse2", cross_sums_sse2, 1 },
++  { "avx2", cross_sums_avx2, 2 },
++  { "avx512", cross_sums_avx512, 3 },
++};
++
++static int
++cpu_level (void)
++{
++  if (__builtin_cpu_supports ("avx512bw"))
++    return 3;
++  if (__builtin_cpu_supports ("avx2"))
++    return 2;
++  return 1;
++}
++
++static gboolean
++skip_unsupported (guint k)
++{
++  if (copies[k].level <= cpu_level ())
++    return FALSE;
++  g_autofree char *msg = g_strdup_printf ("no %s on this CPU", copies[k].name);
++
++  g_test_skip (msg);
++  return TRUE;
++}
++
++/* x0 and x1 widened to whole blocks, as layer_sums_fullb() calls them */
++static void
++check_copy (guint k, const Layer *a, const Layer *b, int dx, int dy,
++            const gboolean fulla)
++{
++  int x0 = MAX (0, dx), x1 = MIN (a->w, b->w + dx);
++  int y0 = MAX (0, dy), y1 = MIN (a->h, b->h + dy);
++  int extra = (BLOCK - (x1 - x0) % BLOCK) % BLOCK;
++  gint64 s[5] = { 0 }, ref[5];
++
++  reference_sums (a, b, dx, dy, x0, y0, x1, y1, ref);
++  copies[k].fn (a, b, dx, dy, x0 - extra / 2, y0, x1 + extra - extra / 2, y1,
++                fulla, s);
++  g_assert_cmpint (s[4], ==, ref[4]);
++  if (!fulla)
++    {
++      g_assert_cmpint (s[1], ==, ref[1]);
++      g_assert_cmpint (s[3], ==, ref[3]);
++    }
++}
++
++static void
++test_cross_sums_copy (gconstpointer data)
++{
++  guint k = GPOINTER_TO_UINT (data);
++  GRand *r;
++
++  if (skip_unsupported (k))
++    return;
++  r = g_rand_new_with_seed (3);
++  for (int c = 0; c < 200; c++)
++    {
++      int w = g_rand_int_range (r, 8, 160), h = g_rand_int_range (r, 8, 100);
++      g_autofree guint8 *pimg = random_image (r, w, h);
++      g_autofree guint8 *timg = random_image (r, w, h);
++      int dx = g_rand_int_range (r, -(w - 1), w), dy = g_rand_int_range (r, -(h - 1), h);
++      Layer a, b;
++
++      if (c % 2)
++        layer_rotated (&a, pimg, w, h, g_rand_double_range (r, -30, 30));
++      else
++        layer_from_image (&a, pimg, NULL, w, h);
++      layer_from_image (&b, timg, NULL, w, h);
++      check_copy (k, &a, &b, dx, dy, a.full);
++      layer_clear (&a);
++      layer_clear (&b);
++    }
++  g_rand_free (r);
++}
++
++/* The largest square layers that get tables, at the pixel values with the
++ * largest products: the 32-bit total of the lanes comes within 0.03% of
++ * 2^31 */
++static void
++test_cross_sums_copy_at_lane_limit (gconstpointer data)
++{
++  const int w = 362, h = 362;
++  const guint8 values[][2] = { { 0, 0 }, { 0, 255 }, { 255, 255 } };
++  guint k = GPOINTER_TO_UINT (data);
++  g_autofree guint8 *pimg = g_new (guint8, w * h);
++  g_autofree guint8 *timg = g_new (guint8, w * h);
++
++  g_assert_cmpint (w * h, <=, TABLE_MAX_PIXELS);
++  g_assert_cmpint ((w + 1) * (h + 1), >, TABLE_MAX_PIXELS);
++  if (skip_unsupported (k))
++    return;
++  for (guint v = 0; v < G_N_ELEMENTS (values); v++)
++    {
++      Layer a, b;
++
++      memset (pimg, values[v][0], w * h);
++      memset (timg, values[v][1], w * h);
++      layer_from_image (&a, pimg, NULL, w, h);
++      layer_from_image (&b, timg, NULL, w, h);
++      check_copy (k, &a, &b, 0, 0, FALSE);
++      check_copy (k, &a, &b, 0, 0, TRUE);
++      layer_clear (&a);
++      layer_clear (&b);
++    }
++}
++
++/* /proc/cpuinfo as a second opinion on cpu_level(), 0 when it can't be
++ * read */
++static int
++cpuinfo_level (void)
++{
++  g_autofree char *info = NULL;
++
++  g_autoptr(GRegex) avx512 = g_regex_new ("^flags\\b.*\\bavx512bw\\b", G_REGEX_MULTILINE, 0, NULL);
++  g_autoptr(GRegex) avx2 = g_regex_new ("^flags\\b.*\\bavx2\\b", G_REGEX_MULTILINE, 0, NULL);
++
++  if (!g_file_get_contents ("/proc/cpuinfo", &info, NULL, NULL))
++    return 0;
++  if (g_regex_match (avx512, info, 0, NULL))
++    return 3;
++  if (g_regex_match (avx2, info, 0, NULL))
++    return 2;
++  return 1;
++}
++
++/* The level is fixed on first use, so each value of FP_ELANPRESS_SIMD
++ * gets its own process. Each process also runs the reference sums, so
++ * every copy the CPU has goes through cross_sums(). */
++static void
++test_simd_env (void)
++{
++  const char *caps[] = { NULL, "", "sse2", "AVX2", "avx512", "neon" };
++  int cpu = cpu_level ();
++
++  /* a kernel booted with clearcpuid= or some hypervisors hide flags that
++   * CPUID still reports */
++  if (cpuinfo_level () != cpu)
++    {
++      g_test_skip ("/proc/cpuinfo and CPUID disagree on AVX2 or AVX-512BW");
++      return;
++    }
++  if (g_test_subprocess ())
++    {
++      const char *cap = g_getenv ("FP_ELANPRESS_SIMD");
++      int want = cpu;
++
++      if (g_strcmp0 (cap, "sse2") == 0)
++        want = 1;
++      else if (g_strcmp0 (cap, "AVX2") == 0)
++        want = MIN (cpu, 2);
++      g_assert_cmpint (cross_sums_level (), ==, want);
++      test_sums_match_reference ();
++      return;
++    }
++  for (guint i = 0; i < G_N_ELEMENTS (caps); i++)
++    {
++      if (caps[i])
++        g_setenv ("FP_ELANPRESS_SIMD", caps[i], TRUE);
++      else
++        g_unsetenv ("FP_ELANPRESS_SIMD");
++      g_test_trap_subprocess (NULL, 0, 0);
++      g_test_trap_assert_passed ();
++      if (g_strcmp0 (caps[i], "neon") == 0)
++        g_test_trap_assert_stderr ("*FP_ELANPRESS_SIMD=neon not recognised*");
++      else
++        g_test_trap_assert_stderr_unmatched ("*not recognised*");
++    }
++  g_unsetenv ("FP_ELANPRESS_SIMD");
++}
++#else
++/* with one copy of the sums, a set FP_ELANPRESS_SIMD is logged once */
++static void
++test_simd_env_unused (void)
++{
++  const char *caps[] = { NULL, "", "avx2" };
++
++  if (g_test_subprocess ())
++    {
++      g_autofree guint8 *img = g_malloc0 (32 * 32);
++      ElanpressMatchParams p;
++
++      elanpress_match_params_default (&p);
++      for (int i = 0; i < 2; i++)
++        elanpress_probe_free (elanpress_probe_new (img, 32, 32, &p));
++      return;
++    }
++  for (guint i = 0; i < G_N_ELEMENTS (caps); i++)
++    {
++      if (caps[i])
++        g_setenv ("FP_ELANPRESS_SIMD", caps[i], TRUE);
++      else
++        g_unsetenv ("FP_ELANPRESS_SIMD");
++      g_test_trap_subprocess (NULL, 0, 0);
++      g_test_trap_assert_passed ();
++      if (caps[i] && *caps[i])
++        g_test_trap_assert_stderr ("*FP_ELANPRESS_SIMD=avx2 has no effect*");
++      else
++        g_test_trap_assert_stderr_unmatched ("*has no effect*");
++      g_test_trap_assert_stderr_unmatched ("*has no effect*has no effect*");
++    }
++  g_unsetenv ("FP_ELANPRESS_SIMD");
++}
++#endif
++
++/* this test, like the window radius one, uses data built on x86-64 with
++ * glibc's libm and no FMA, where other rounding can move the shift */
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++/* The windowed half-resolution search finds the same alignment as the
++ * full search for a crop of a larger print */
++static void
++test_coarse_peaks_find_the_shift (void)
++{
++  GRand *r = g_rand_new_with_seed (4);
++  const int W = 100, H = 70, w = 80, h = 56;
++
++  for (int c = 0; c < 40; c++)
++    {
++      g_autofree guint8 *big = texture_image (r, W, H);
++      g_autofree guint8 *probe = g_new (guint8, w * h);
++      g_autofree guint8 *tmpl = g_new (guint8, w * h);
++      int sx = g_rand_int_range (r, 0, 20), sy = g_rand_int_range (r, 0, 14);
++      ElanpressMatchResult res[2];
++
++      for (int y = 0; y < h; y++)
++        for (int x = 0; x < w; x++)
++          {
++            probe[y * w + x] = big[(y + sy) * W + x + sx];
++            tmpl[y * w + x] = big[y * W + x];
++          }
++      for (int peaks = 0; peaks < 2; peaks++)
++        {
++          ElanpressMatchParams p;
++          ElanpressProbe *pr;
++
++          elanpress_match_params_default (&p);
++          p.rot_prefilter = 3;
++          p.coarse_peaks = peaks ? 4 : 0;
++          pr = elanpress_probe_new (probe, w, h, &p);
++          fallbacks = 0;
++          elanpress_probe_match (pr, tmpl, &res[peaks]);
++          elanpress_probe_free (pr);
++          /* equal results alone would also come from falling back to the
++           * full search every time */
++          g_assert_cmpint (fallbacks, ==, 0);
++        }
++      g_assert_cmpfloat (res[0].peak, >, 0.99);
++      g_assert_cmpint (res[0].dx, ==, -sx);
++      g_assert_cmpint (res[0].dy, ==, -sy);
++      g_assert_cmpfloat (fabs (res[0].rot), <, 1e-9);
++      g_assert_cmpint (res[1].dx, ==, res[0].dx);
++      g_assert_cmpint (res[1].dy, ==, res[0].dy);
++      g_assert_cmpfloat (res[1].rot, ==, res[0].rot);
++      g_assert_cmpfloat (res[1].score, ==, res[0].score);
++    }
++  g_rand_free (r);
++}
++#endif
++
++static const Cand *
++find_peak (const Cand *c, int k, int dx, int dy)
++{
++  for (int i = 0; i < k; i++)
++    if (c[i].rot >= 0 && c[i].dx == dx && c[i].dy == dy)
++      return &c[i];
++  return NULL;
++}
++
++static int
++count_peaks (const Cand *c, int k)
++{
++  int n = 0;
++
++  for (int i = 0; i < k; i++)
++    n += c[i].rot >= 0;
++  return n;
++}
++
++static void
++test_peak_insert (void)
++{
++  Cand c[3];
++
++  for (int i = 0; i < 3; i++)
++    c[i] = (Cand){ -3.0, -1, 0, 0 };
++
++  peak_insert (c, 3, 0.5, 0, 0, 0);
++  /* within 2 pixels: a worse peak is dropped, a better one replaces it */
++  peak_insert (c, 3, 0.4, 0, 1, 1);
++  g_assert_cmpint (count_peaks (c, 3), ==, 1);
++  g_assert_nonnull (find_peak (c, 3, 0, 0));
++  peak_insert (c, 3, 0.6, 0, 2, -2);
++  g_assert_cmpint (count_peaks (c, 3), ==, 1);
++  g_assert_nonnull (find_peak (c, 3, 2, -2));
++  g_assert_cmpfloat (find_peak (c, 3, 2, -2)->score, ==, 0.6);
++
++  /* 3 pixels apart is far enough to keep both */
++  peak_insert (c, 3, 0.3, 0, 5, -2);
++  peak_insert (c, 3, 0.2, 0, 20, 20);
++  g_assert_cmpint (count_peaks (c, 3), ==, 3);
++
++  /* when full, a far peak replaces the worst only if it beats it */
++  peak_insert (c, 3, 0.1, 0, 40, 40);
++  g_assert_null (find_peak (c, 3, 40, 40));
++  peak_insert (c, 3, 0.25, 0, 40, 40);
++  g_assert_null (find_peak (c, 3, 20, 20));
++  g_assert_nonnull (find_peak (c, 3, 40, 40));
++
++  /* a peak within 2 pixels of two others that beats both takes one slot
++   * and frees the other */
++  peak_insert (c, 3, 0.9, 0, 3, -2);
++  g_assert_cmpint (count_peaks (c, 3), ==, 2);
++  g_assert_nonnull (find_peak (c, 3, 3, -2));
++  g_assert_cmpfloat (find_peak (c, 3, 3, -2)->score, ==, 0.9);
++  g_assert_nonnull (find_peak (c, 3, 40, 40));
++
++  /* within 2 pixels of a better one: dropped even with a free slot */
++  peak_insert (c, 3, 0.8, 0, 4, -1);
++  g_assert_cmpint (count_peaks (c, 3), ==, 2);
++}
++
++/* Random pairs whose one quarter-resolution peak sits at an overlap that
++ * is too small at half resolution everywhere in its window, so the
++ * windowed search finds nothing and has to search the whole rotation.
++ * Such pairs are rare, so the test runs through seeds until it has seen
++ * three, rather than naming seeds that depend on how the build rounds */
++static void
++test_coarse_peaks_fall_back (void)
++{
++  int found = 0;
++  guint32 seed;
++
++  for (seed = 1; seed <= 4000 && found < 3; seed++)
++    {
++      GRand *r = g_rand_new_with_seed (seed);
++      int w = g_rand_int_range (r, 24, 64), h = g_rand_int_range (r, 24, 64);
++      int tw = g_rand_int_range (r, 24, 64), th = g_rand_int_range (r, 24, 64);
++      double min_overlap = g_rand_double_range (r, 0.3, 0.7);
++      g_autofree guint8 *probe = random_image (r, w, h);
++      g_autofree guint8 *tmpl = random_image (r, tw, th);
++      ElanpressMatchResult res[2];
++      int fell_back = 0;
++
++      for (int peaks = 1; peaks >= 0; peaks--)
++        {
++          ElanpressMatchParams p;
++          ElanpressProbe *pr;
++
++          elanpress_match_params_default (&p);
++          p.min_overlap = min_overlap;
++          p.rot_prefilter = 1;
++          p.coarse_peaks = peaks;
++          pr = elanpress_probe_new (probe, w, h, &p);
++          fallbacks = 0;
++          elanpress_probe_match_canvas (pr, tmpl, NULL, tw, th, &res[peaks]);
++          elanpress_probe_free (pr);
++          if (peaks)
++            fell_back = fallbacks;
++          if (!fell_back)
++            break;
++        }
++      g_rand_free (r);
++      if (!fell_back)
++        continue;
++      g_assert_cmpint (fell_back, ==, 1);
++      /* only one rotation reaches half resolution, so after the fallback
++       * both searches looked at the same offsets. Some pairs have none
++       * that overlap enough; they must agree too, but don't count */
++      if (res[0].peak > -2.0)
++        found++;
++      g_assert_cmpint (res[1].dx, ==, res[0].dx);
++      g_assert_cmpint (res[1].dy, ==, res[0].dy);
++      g_assert_cmpfloat (res[1].rot, ==, res[0].rot);
++      g_assert_cmpfloat (res[1].score, ==, res[0].score);
++    }
++  /* the pairs depend on the platform's rounding, so say how far the scan
++   * went for a failure where it was never run */
++  g_test_message ("%d pairs fell back in the first %u seeds", found, seed - 1);
++  g_assert_cmpint (found, ==, 3);
++}
++
++/* Two unrelated random images, matched with or without the
++ * quarter-resolution peaks. Their best alignment is weak and can lie
++ * anywhere, so it often sits off the centre of a window */
++static ElanpressMatchResult
++match_noise (guint32 seed, const guint8 *mask, int score_mode, int peaks)
++{
++  const int w = 80, h = 56;
++  GRand *r = g_rand_new_with_seed (seed);
++  g_autofree guint8 *probe = random_image (r, w, h);
++  g_autofree guint8 *tmpl = random_image (r, w, h);
++  ElanpressMatchParams p;
++  ElanpressMatchResult res;
++  ElanpressProbe *pr;
++
++  elanpress_match_params_default (&p);
++  p.score_mode = score_mode;
++  p.coarse_peaks = peaks;
++  pr = elanpress_probe_new (probe, w, h, &p);
++  fallbacks = 0;
++  elanpress_probe_match_canvas (pr, tmpl, mask, w, h, &res);
++  elanpress_probe_free (pr);
++  g_rand_free (r);
++  return res;
++}
++
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++static gboolean
++same_result (const ElanpressMatchResult *a, const ElanpressMatchResult *b)
++{
++  return a->dx == b->dx && a->dy == b->dy && a->rot == b->rot &&
++         a->sidelobe == b->sidelobe && a->score == b->score;
++}
++#endif
++
++/* the windowed search gives the full search's result without falling
++ * back, and with the matcher changed by the test hooks it would not */
++static void
++match_noise_both_ways (guint32 seed, const guint8 *mask, int score_mode,
++                       gboolean witness_peaks, int witness_radius)
++{
++  ElanpressMatchResult full, windowed;
++
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++  ElanpressMatchResult witness;
++#endif
++
++  full = match_noise (seed, mask, score_mode, 0);
++  windowed = match_noise (seed, mask, score_mode, 4);
++  g_assert_cmpint (fallbacks, ==, 0);
++  g_assert_cmpfloat (full.peak, >, -2.0);
++  g_assert_cmpint (windowed.dx, ==, full.dx);
++  g_assert_cmpint (windowed.dy, ==, full.dy);
++  g_assert_cmpfloat (windowed.rot, ==, full.rot);
++  g_assert_cmpfloat (windowed.sidelobe, ==, full.sidelobe);
++  g_assert_cmpfloat (windowed.score, ==, full.score);
++
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++  /* the pairs were picked on x86-64, as for the window radius test */
++  force_peaks = witness_peaks;
++  peak_radius = witness_radius;
++  witness = match_noise (seed, mask, score_mode, 4);
++  force_peaks = FALSE;
++  peak_radius = 3;
++  g_assert_false (same_result (&witness, &full));
++#endif
++}
++
++/* This test uses pairs of random images picked on x86-64 with glibc's libm
++ * and no FMA, where other rounding can change which offsets they hit */
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++/* pairs whose windowed search finds the full search's offset with the
++ * window radius of 3 and misses it with 2 */
++static void
++test_coarse_peaks_window_radius (void)
++{
++  const guint32 seeds[] = { 3, 11, 12 };
++
++  for (guint i = 0; i < G_N_ELEMENTS (seeds); i++)
++    match_noise_both_ways (seeds[i], NULL, 0, FALSE, 2);
++}
++#endif
++
++/* A masked canvas and the sidelobe score modes keep the full search. For
++ * these pairs the peaks would change the result, as the test shows by
++ * turning them on */
++static void
++test_coarse_peaks_off_for_mask (void)
++{
++  const guint32 seeds[] = { 0, 2, 3 };
++  guint8 mask[80 * 56];
++
++  for (int y = 0; y < 56; y++)
++    for (int x = 0; x < 80; x++)
++      mask[y * 80 + x] = (x / 8 + y / 8) % 3 ? 255 : 0;
++  for (guint i = 0; i < G_N_ELEMENTS (seeds); i++)
++    match_noise_both_ways (seeds[i], mask, 0, TRUE, 3);
++}
++
++static void
++test_coarse_peaks_off_for_sidelobe (void)
++{
++  const guint32 seeds[] = { 0, 2, 3 };
++
++  for (guint i = 0; i < G_N_ELEMENTS (seeds); i++)
++    match_noise_both_ways (seeds[i], NULL, 1, TRUE, 3);
++}
++
++/* With FP_ELANPRESS_MIN_OVERLAP next to 0, the corners where two noise
++ * images barely touch would score 1.0. Without the half-resolution floor
++ * the full search finds no placement on nearly every pair, and with a
++ * 4-pixel quarter-resolution floor the windowed search misses on some */
++static void
++test_min_overlap_floor (void)
++{
++  const int w = 80, h = 56;
++  GRand *r = g_rand_new_with_seed (7);
++  guint8 mask[80 * 56];
++
++  for (int y = 0; y < h; y++)
++    for (int x = 0; x < w; x++)
++      mask[y * w + x] = (x / 8 + y / 8) % 3 ? 255 : 0;
++  for (int c = 0; c < 40; c++)
++    {
++      g_autofree guint8 *probe = random_image (r, w, h);
++      g_autofree guint8 *tmpl = random_image (r, w, h);
++
++      /* windowed, full, on a masked canvas and with the sidelobe score */
++      for (int mode = 0; mode < 4; mode++)
++        {
++          ElanpressMatchParams p;
++          ElanpressMatchResult res;
++          ElanpressProbe *pr;
++
++          elanpress_match_params_default (&p);
++          p.min_overlap = 1e-9;
++          if (mode == 1)
++            {
++              p.coarse_peaks = 0;
++              p.rot_prefilter = 0;
++            }
++          if (mode == 3)
++            p.score_mode = 1;
++          pr = elanpress_probe_new (probe, w, h, &p);
++          elanpress_probe_match_canvas (pr, tmpl, mode == 2 ? mask : NULL,
++                                        w, h, &res);
++          elanpress_probe_free (pr);
++          g_assert_cmpint (res.overlap, >=, MIN_OVERLAP_PIXELS);
++          g_assert_cmpfloat (res.peak, <, 0.9);
++        }
++    }
++  g_rand_free (r);
++}
++
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++/* Whole matches with the default settings and the full half-resolution
++ * search, against what the matcher found before the sums were rewritten:
++ * two pairs cut from one noise image with noise added to the template, and
++ * two unrelated ones. Other rounding, as from FMA, could change the last
++ * bits, so this only runs on x86-64 */
++static void
++test_match_unchanged (void)
++{
++  const ElanpressMatchResult want[] = {
++    { 0x1.65a04ee56748bp-1, 0x1.65a04ee56748bp-1, -0x1p+1, 0x1.3688601441729p-1, 0x1.656a2574ebc54p-1, -18, -2, 0x0p+0, 3348 },
++    { 0x1.b7397aebcf748p-5, 0x1.b7397aebcf748p-5, -0x1p+1, -0x1.ff60803c79be1p-7, 0x1.d748b991295fbp-5, -23, -17, 0x1.4p+4, 2098 },
++    { 0x1.f14c27efabb98p-5, 0x1.f14c27efabb98p-5, -0x1p+1, -0x1.27378879e74e6p-6, 0x1.d1d5585c38699p-5, 34, -12, -0x1.8p+3, 1949 },
++    { 0x1.2416154099d2ep-4, 0x1.2416154099d2ep-4, -0x1p+1, -0x1.210e939b8bb79p-5, 0x1.1f9b2d9934d8ep-4, -33, 10, 0x1.8p+4, 1860 },
++  };
++  GRand *r = g_rand_new_with_seed (21);
++  const int W = 100, H = 70, w = 80, h = 56;
++
++  for (guint c = 0; c < G_N_ELEMENTS (want); c++)
++    {
++      g_autofree guint8 *big = random_image (r, W, H);
++      g_autofree guint8 *other = random_image (r, w, h);
++      g_autofree guint8 *probe = g_new (guint8, w * h);
++      g_autofree guint8 *tmpl = g_new (guint8, w * h);
++      int sx = g_rand_int_range (r, 0, 20), sy = g_rand_int_range (r, 0, 14);
++      ElanpressMatchParams p;
++      ElanpressMatchResult res;
++      ElanpressProbe *pr;
++
++      for (int y = 0; y < h; y++)
++        for (int x = 0; x < w; x++)
++          {
++            probe[y * w + x] = big[(y + sy) * W + x + sx];
++            tmpl[y * w + x] = c < 2 ?
++                              CLAMP (big[y * W + x] + g_rand_int_range (r, -40, 41), 0, 255) :
++                              other[y * w + x];
++          }
++      elanpress_match_params_default (&p);
++      /* the windowed search can settle elsewhere, by design */
++      p.coarse_peaks = 0;
++      pr = elanpress_probe_new (probe, w, h, &p);
++      elanpress_probe_match (pr, tmpl, &res);
++      elanpress_probe_free (pr);
++      g_assert_cmpfloat (res.score, ==, want[c].score);
++      g_assert_cmpfloat (res.peak, ==, want[c].peak);
++      g_assert_cmpfloat (res.sidelobe, ==, want[c].sidelobe);
++      g_assert_cmpfloat (res.block_min, ==, want[c].block_min);
++      g_assert_cmpfloat (res.block_mean, ==, want[c].block_mean);
++      g_assert_cmpint (res.dx, ==, want[c].dx);
++      g_assert_cmpint (res.dy, ==, want[c].dy);
++      g_assert_cmpfloat (res.rot, ==, want[c].rot);
++      g_assert_cmpint (res.overlap, ==, want[c].overlap);
++    }
++  g_rand_free (r);
++}
++#endif
++
++/* Without the rotation prefilter, or when it keeps every rotation, there are
++ * no quarter-resolution peaks, so the setting changes nothing */
++static void
++test_coarse_peaks_need_prefilter (void)
++{
++  const int w = 80, h = 56;
++  GRand *r = g_rand_new_with_seed (5);
++  g_autofree guint8 *probe = random_image (r, w, h);
++  g_autofree guint8 *tmpl = random_image (r, w, h);
++
++  for (int keep = 0; keep < 2; keep++)
++    {
++      ElanpressMatchResult res[2];
++
++      for (int peaks = 0; peaks < 2; peaks++)
++        {
++          ElanpressMatchParams p;
++          ElanpressProbe *pr;
++
++          elanpress_match_params_default (&p);
++          p.coarse_peaks = peaks ? 4 : 0;
++          pr = elanpress_probe_new (probe, w, h, &p);
++          p.rot_prefilter = keep ? elanpress_probe_n_rotations (pr) : 0;
++          elanpress_probe_free (pr);
++          pr = elanpress_probe_new (probe, w, h, &p);
++          fallbacks = 0;
++          elanpress_probe_match_canvas (pr, tmpl, NULL, w, h, &res[peaks]);
++          elanpress_probe_free (pr);
++          g_assert_cmpint (fallbacks, ==, 0);
++        }
++      g_assert_cmpfloat (res[1].score, ==, res[0].score);
++      g_assert_cmpfloat (res[1].peak, ==, res[0].peak);
++      g_assert_cmpfloat (res[1].block_min, ==, res[0].block_min);
++      g_assert_cmpint (res[1].dx, ==, res[0].dx);
++      g_assert_cmpint (res[1].dy, ==, res[0].dy);
++      g_assert_cmpfloat (res[1].rot, ==, res[0].rot);
++      g_assert_cmpint (res[1].overlap, ==, res[0].overlap);
++    }
++  g_rand_free (r);
++}
++
++/* At a FP_ELANPRESS_MIN_OVERLAP of 0.2 on 32x32 frames the floors bind at
++ * quarter resolution, which changes which peaks get the slots. The
++ * windowed search must still agree with the full one, and crops of a
++ * texture must still be found where they were cut. On x86-64, with FMA
++ * as well, 39 of the 40 are; the others land a rotation step off, or
++ * elsewhere, as they do without the floors */
++static void
++test_min_overlap_floor_binding (void)
++{
++  GRand *r = g_rand_new_with_seed (8);
++  const int W = 48, H = 48, w = 32, h = 32;
++  int found = 0;
++
++  for (int c = 0; c < 40; c++)
++    {
++      g_autofree guint8 *tmpl = texture_image (r, W, H);
++      g_autofree guint8 *probe = g_new (guint8, w * h);
++      int sx = g_rand_int_range (r, 0, W - w + 1), sy = g_rand_int_range (r, 0, H - h + 1);
++      ElanpressMatchResult res[2];
++
++      for (int y = 0; y < h; y++)
++        for (int x = 0; x < w; x++)
++          probe[y * w + x] = tmpl[(y + sy) * W + x + sx];
++      for (int peaks = 0; peaks < 2; peaks++)
++        {
++          ElanpressMatchParams p;
++          ElanpressProbe *pr;
++
++          elanpress_match_params_default (&p);
++          p.min_overlap = 0.2;
++          p.coarse_peaks = peaks ? 4 : 0;
++          pr = elanpress_probe_new (probe, w, h, &p);
++          elanpress_probe_match_canvas (pr, tmpl, NULL, W, H, &res[peaks]);
++          elanpress_probe_free (pr);
++        }
++      g_assert_cmpint (res[1].dx, ==, res[0].dx);
++      g_assert_cmpint (res[1].dy, ==, res[0].dy);
++      g_assert_cmpfloat (res[1].rot, ==, res[0].rot);
++      g_assert_cmpfloat (res[1].score, ==, res[0].score);
++      if (res[0].dx == -sx && res[0].dy == -sy)
++        found++;
++    }
++  g_test_message ("%d of 40 crops found where they were cut", found);
++  g_assert_cmpint (found, >=, 36);
++  g_rand_free (r);
++}
++
++/* At the default FP_ELANPRESS_MIN_OVERLAP the floors never bind: on the
++ * smallest frame the driver accepts, 32x32, the minimum the matcher takes
++ * at every resolution is above its floor, peaks' margin included. At 0.2
++ * the quarter-resolution ones are at it */
++static void
++test_min_overlap_floor_inert (void)
++{
++  g_autofree guint8 *img = g_malloc0 (32 * 32);
++  ElanpressMatchParams p;
++  ElanpressProbe *pr;
++  MinOverlap m;
++
++  elanpress_match_params_default (&p);
++  pr = elanpress_probe_new (img, 32, 32, &p);
++  min_overlap_pixels (pr, &m);
++  elanpress_probe_free (pr);
++  g_assert_cmpint (m.full, >, MIN_OVERLAP_PIXELS);
++  g_assert_cmpint (m.half, >, MIN_OVERLAP_PIXELS / 4);
++  g_assert_cmpint (m.quarter, >, MIN_OVERLAP_PIXELS / 4);
++  g_assert_cmpint (m.peak, >, MIN_OVERLAP_PIXELS / 4);
++
++  p.min_overlap = 0.2;
++  pr = elanpress_probe_new (img, 32, 32, &p);
++  min_overlap_pixels (pr, &m);
++  elanpress_probe_free (pr);
++  g_assert_cmpint (m.full, >, MIN_OVERLAP_PIXELS);
++  g_assert_cmpint (m.half, >, MIN_OVERLAP_PIXELS / 4);
++  g_assert_cmpint (m.quarter, ==, MIN_OVERLAP_PIXELS / 4);
++  g_assert_cmpint (m.peak, ==, MIN_OVERLAP_PIXELS / 4);
++
++  /* a frame too small for the floor gets no placement, not a bad one */
++  {
++    g_autoptr(GRand) r = g_rand_new_with_seed (9);
++    g_autofree guint8 *tiny = random_image (r, 7, 7);
++    ElanpressMatchResult res;
++
++    pr = elanpress_probe_new (tiny, 7, 7, &p);
++    elanpress_probe_match (pr, tiny, &res);
++    elanpress_probe_free (pr);
++    g_assert_cmpint (res.overlap, ==, 0);
++    g_assert_cmpfloat (res.peak, ==, -2.0);
++  }
++}
++
++int
++main (int argc, char *argv[])
++{
++  g_test_init (&argc, &argv, NULL);
++
++  g_test_add_func ("/elanpress/sums/reference", test_sums_match_reference);
++  g_test_add_func ("/elanpress/sums/table-limit", test_sums_at_table_limit);
++  g_test_add_func ("/elanpress/sums/without-tables", test_sums_without_tables);
++  g_test_add_func ("/elanpress/sums/layer-half", test_layer_half);
++  g_test_add_func ("/elanpress/sums/canvas-paste", test_canvas_paste);
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++  g_test_add_func ("/elanpress/match/unchanged", test_match_unchanged);
++#endif
++#ifdef ELANPRESS_DISPATCH
++  for (guint k = 0; k < G_N_ELEMENTS (copies); k++)
++    {
++      g_autofree char *path = g_strdup_printf ("/elanpress/sums/cross-sums/%s", copies[k].name);
++      g_autofree char *limit = g_strdup_printf ("/elanpress/sums/lane-limit/%s", copies[k].name);
++
++      g_test_add_data_func (path, GUINT_TO_POINTER (k), test_cross_sums_copy);
++      g_test_add_data_func (limit, GUINT_TO_POINTER (k), test_cross_sums_copy_at_lane_limit);
++    }
++  g_test_add_func ("/elanpress/sums/simd-env", test_simd_env);
++#else
++  g_test_add_func ("/elanpress/sums/simd-env-unused", test_simd_env_unused);
++#endif
++  g_test_add_func ("/elanpress/match/peak-insert", test_peak_insert);
++  g_test_add_func ("/elanpress/match/coarse-peaks-fall-back", test_coarse_peaks_fall_back);
++  g_test_add_func ("/elanpress/match/coarse-peaks-need-prefilter", test_coarse_peaks_need_prefilter);
++#if defined(__x86_64__) && defined(__GLIBC__) && !defined(__FMA__)
++  g_test_add_func ("/elanpress/match/coarse-peaks", test_coarse_peaks_find_the_shift);
++  g_test_add_func ("/elanpress/match/coarse-peaks-window", test_coarse_peaks_window_radius);
++#endif
++  g_test_add_func ("/elanpress/match/coarse-peaks-masked", test_coarse_peaks_off_for_mask);
++  g_test_add_func ("/elanpress/match/coarse-peaks-sidelobe", test_coarse_peaks_off_for_sidelobe);
++  g_test_add_func ("/elanpress/match/min-overlap-floor", test_min_overlap_floor);
++  g_test_add_func ("/elanpress/match/min-overlap-floor-inert", test_min_overlap_floor_inert);
++  g_test_add_func ("/elanpress/match/min-overlap-floor-binding", test_min_overlap_floor_binding);
++
++  return g_test_run ();
++}
