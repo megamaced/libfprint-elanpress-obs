@@ -1,0 +1,13 @@
+{
+  "baseline": {
+    "baselibs.conf": "bef903d902979435626bbed236240728",
+    "focal-tech-support.patch": "8e6fe004ee9ff0f4cde69143db50d465",
+    "label-can-only-be-part-of-a-statement.patch": "688f46de7cd4a06c40442d74ef166ef4",
+    "libfprint-old-meson.patch": "9495cf8bb4b18146b56ca35a4c48c6cd",
+    "libfprint-v1.94.10+tod1.tar.bz2": "2731ed8d9f54cdbfffd7ecf148ce1fdc",
+    "libfprint.changes": "7b086884e7f72c17ca74d1f04ba8c044",
+    "libfprint.spec": "6f46cd5d41c3b78788563849eb8849a1"
+  },
+  "patch_sha256": "955a7216a074978922027e7a2bdc094fe4ef070fe2cdfe14320c1f6c8e1805dc",
+  "upstream": "952a2c9b1e644b7b98541e0a1d4955f0470affa3"
+}
