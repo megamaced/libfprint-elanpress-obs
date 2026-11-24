@@ -8,6 +8,6 @@
     "libfprint.changes": "7b086884e7f72c17ca74d1f04ba8c044",
     "libfprint.spec": "6f46cd5d41c3b78788563849eb8849a1"
   },
-  "patch_sha256": "e585eaaf3c795e2b98e7434dbe5fca4af417c1e3894274cd145141cab0c43679",
-  "upstream": "c3983a148a20d5a86101db9de0381a003cd433ed"
+  "patch_sha256": "8bfcbdfcbe8dff1455c605c9c774a0c89cf7634a90fef85db5e20d9f42666be7",
+  "upstream": "8c9c561ebff8a755266447642e3d47abecd2ea02"
 }

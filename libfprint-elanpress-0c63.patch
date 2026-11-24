@@ -1,28 +1,29 @@
 diff --git a/data/autosuspend.hwdb b/data/autosuspend.hwdb
-index 5c19571..0aa7d83 100644
+index 5c19571..148a464 100644
 --- a/data/autosuspend.hwdb
 +++ b/data/autosuspend.hwdb
-@@ -142,13 +142,9 @@ usb:v04F3p0C30*
+@@ -142,13 +142,8 @@ usb:v04F3p0C30*
  usb:v04F3p0C31*
  usb:v04F3p0C32*
  usb:v04F3p0C33*
 -usb:v04F3p0C3D*
  usb:v04F3p0C42*
 -usb:v04F3p0C4B*
- usb:v04F3p0C4D*
+-usb:v04F3p0C4D*
  usb:v04F3p0C4F*
 -usb:v04F3p0C63*
 -usb:v04F3p0C6E*
  usb:v04F3p0C58*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
-@@ -171,6 +167,14 @@ usb:v04F3p0CB0*
+@@ -171,6 +166,15 @@ usb:v04F3p0CB0*
   ID_AUTOSUSPEND=1
   ID_PERSIST=0
  
 +# Supported by libfprint driver elanpress
 +usb:v04F3p0C3D*
 +usb:v04F3p0C4B*
++usb:v04F3p0C4D*
 +usb:v04F3p0C63*
 +usb:v04F3p0C6E*
 + ID_AUTOSUSPEND=1
@@ -32,17 +33,17 @@ index 5c19571..0aa7d83 100644
  usb:v1C7Ap0603*
   ID_AUTOSUSPEND=1
 diff --git a/libfprint/drivers/elan.h b/libfprint/drivers/elan.h
-index 7d08994..e09c85a 100644
+index 7d08994..8ff15f9 100644
 --- a/libfprint/drivers/elan.h
 +++ b/libfprint/drivers/elan.h
-@@ -213,13 +213,9 @@ static const FpIdEntry elan_id_table[] = {
+@@ -213,13 +213,8 @@ static const FpIdEntry elan_id_table[] = {
    {.vid = ELAN_VEND_ID,  .pid = 0x0c31, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c32, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c33, .driver_data = ELAN_ALL_DEV},
 -  {.vid = ELAN_VEND_ID,  .pid = 0x0c3d, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c42, .driver_data = ELAN_0C42},
 -  {.vid = ELAN_VEND_ID,  .pid = 0x0c4b, .driver_data = ELAN_ALL_DEV},
-   {.vid = ELAN_VEND_ID,  .pid = 0x0c4d, .driver_data = ELAN_ALL_DEV},
+-  {.vid = ELAN_VEND_ID,  .pid = 0x0c4d, .driver_data = ELAN_ALL_DEV},
    {.vid = ELAN_VEND_ID,  .pid = 0x0c4f, .driver_data = ELAN_ALL_DEV},
 -  {.vid = ELAN_VEND_ID,  .pid = 0x0c63, .driver_data = ELAN_ALL_DEV},
 -  {.vid = ELAN_VEND_ID,  .pid = 0x0c6e, .driver_data = ELAN_ALL_DEV},
@@ -3326,10 +3327,10 @@ index 0000000..8289cd6
 +}
 diff --git a/libfprint/drivers/elanpress.h b/libfprint/drivers/elanpress.h
 new file mode 100644
-index 0000000..0434d69
+index 0000000..00ce352
 --- /dev/null
 +++ b/libfprint/drivers/elanpress.h
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,124 @@
 +/*
 + * Driver for ELAN press-type (touch) fingerprint sensors
 + *
@@ -3411,6 +3412,7 @@ index 0000000..0434d69
 +enum {
 +  ELANPRESS_0C3D,
 +  ELANPRESS_0C4B,
++  ELANPRESS_0C4D,
 +  ELANPRESS_0C63,
 +  ELANPRESS_0C6E,
 +};
@@ -3425,6 +3427,14 @@ index 0000000..0434d69
 +   * accepted (0.894 to 0.970) and 0/12 impostor touches (at most 0.758);
 +   * with 20, 2/4 genuine. */
 +  [ELANPRESS_0C4B] = { 0.85, 40, 3, 0.85 },
++  /* 150x52 like 0c6e (Lenovo IdeaPad 5 14ITL05, fw 0x0187). Full-search
++   * scores (FP_ELANPRESS_THRESHOLD=1.5) against one subject's 20-touch
++   * enrolment: 10 normal touches of the enrolled finger 0.844 to 0.974,
++   * the subject's other fingers at most 0.850 (left index, one in ten
++   * above 0.84), and 55 index and thumb touches of 11 other people at
++   * most 0.754. The lowest cutoff that rejects every non-enrolled finger
++   * is 0.86. */
++  [ELANPRESS_0C4D] = { 0.86, 20, 1, 0.95 },
 +  /* 80x80, two subjects on one pad: 0.76 admitted an unenrolled finger
 +   * there, 0.85 did not (see the merge request discussion). */
 +  [ELANPRESS_0C63] = { 0.85, 20, 3, 0.85 },
@@ -3440,6 +3450,7 @@ index 0000000..0434d69
 +static const FpIdEntry elanpress_id_table[] = {
 +  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c3d, .driver_data = ELANPRESS_0C3D, },
 +  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c4b, .driver_data = ELANPRESS_0C4B, },
++  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c4d, .driver_data = ELANPRESS_0C4D, },
 +  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c63, .driver_data = ELANPRESS_0C63, },
 +  {.vid = ELANPRESS_VEND_ID, .pid = 0x0c6e, .driver_data = ELANPRESS_0C6E, },
 +  {.vid = 0, .pid = 0, },
